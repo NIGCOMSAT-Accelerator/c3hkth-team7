@@ -56,9 +56,11 @@ outlook. **Step-by-step walkthrough, deployment and the operating manual:
 |---|---|
 | **README.md** (this file) | Product mission, personas, features, system architecture, data sources, verification status |
 | **[USAGE.md](USAGE.md)** | Prerequisites, zero-cost `.env`, build & deploy commands, and the first-time user manual |
-| **[CLAUDE.md](CLAUDE.md)** | Engineering invariants — the rules that break things subtly if you don't know them |
 | **[openapi.json](openapi.json)** | The full API contract: 100 paths, 119 operations. `make openapi-check` fails the build if it drifts |
-| **[docs/](docs/)** | Dataset audit, EO smoke tests against live endpoints, persistence design, AOI input contract |
+
+Those two, plus the live API docs at `/docs` and `/redoc`, are the whole documentation
+surface — there is nothing a reader needs that is not in them. The dataset audit, the EO
+smoke-test transcripts and the design reviews are local working notes and are not published.
 
 ---
 
@@ -1136,8 +1138,6 @@ frontend/
   components/    AreaPicker · TrackModules · RiskTimeline · SeverityBadge
                  VerdictPanel · SessionGuard · ThemeToggle
   lib/           server-only API client · shared types · session · portal
-docs/            dataset audit · EO smoke tests · persistence design
-                 AOI input contract · frontend journey review
 Makefile                 build · release (multi-arch) · run · operations
 docker-compose.yml       API + workers + all state, internal network only
 docker-compose.dev.yml   local override — publishes store ports on 127.0.0.1
