@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-label="SHELTER">
+  <!--
+    The SHELTER mark.
+
+    Four ideas stacked top to bottom, because read in that order they are the whole
+    product, and a logo showing only part of it would misdescribe the service:
+
+      * the satellite     — a sensor keeping watch overhead, where the warning starts
+      * the coverage arcs — signal spreading down over the area being observed
+      * the SHELTER form  — a roof, the literal name, and the household protected
+      * the plot dot      — the specific piece of ground being monitored
+
+    The satellite is the addition. Without it the arcs read as a decorative rainbow over a
+    house; with it the sequence becomes cause and effect — something is watching, and this
+    is who it protects.
+
+    ## Why the satellite is three rounded rectangles and nothing more
+
+    The topbar renders this at 26px. A dish, a truss or a solar-cell grid collapses into a
+    smudge at that size, so the satellite is a body plus two panels — the minimum that
+    still reads as a spacecraft rather than a dash. Detail that survives at 512px but
+    muddies at 26px would make the smallest and most-used instance the worst one.
+
+    Built as geometry rather than lettering so it reads at 20px in a header and at 512px
+    as an app icon.
+
+    ## This file and components/ShelterLogo.tsx must stay in step
+
+    The component is what the UI renders; this file exists for the favicon, the OG image
+    and the app icon, where an actual file is required. The geometry is duplicated
+    deliberately — the component needs `currentColor` to theme, this needs a gradient to
+    stand alone on a white tab strip — but the SHAPES must match, or the icon in a browser
+    tab will not be the logo on the page.
+
+    viewBox is 40x40 with the artwork inset, so the mark has built-in optical padding and
+    callers can size it without adding margins that then need undoing.
+  -->
+  <defs>
+    <linearGradient id="shelterMarkFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#9a2ce9" />
+      <stop offset="100%" stop-color="#6a0dad" />
+    </linearGradient>
+  </defs>
+
+  <!-- Satellite body. -->
+  <rect x="17.7" y="2.6" width="4.6" height="4.1" rx="1.1" fill="url(#shelterMarkFill)" />
+  <!-- Solar panels. Lighter by opacity rather than a second colour, so the mark still
+       works printed in one ink. -->
+  <rect
+    x="11.9"
+    y="3.7"
+    width="4.9"
+    height="1.9"
+    rx="0.65"
+    fill="url(#shelterMarkFill)"
+    opacity="0.55"
+  />
+  <rect
+    x="23.2"
+    y="3.7"
+    width="4.9"
+    height="1.9"
+    rx="0.65"
+    fill="url(#shelterMarkFill)"
+    opacity="0.55"
+  />
+
+  <!-- Coverage arcs, spreading down from the satellite. Two rather than one: a single arc
+       reads as a rainbow, two nested at different opacities read as signal. Round caps so
+       they stay legible when the stroke scales down. -->
+  <path
+    d="M13.2 12.9a9.2 9.2 0 0 1 13.6 0"
+    fill="none"
+    stroke="url(#shelterMarkFill)"
+    stroke-width="2.1"
+    stroke-linecap="round"
+    opacity="0.62"
+  />
+  <path
+    d="M8.8 16.4a14.6 14.6 0 0 1 22.4 0"
+    fill="none"
+    stroke="url(#shelterMarkFill)"
+    stroke-width="2.1"
+    stroke-linecap="round"
+    opacity="0.26"
+  />
+
+  <!-- The shelter: roof over an open base. The opening is sized to CONTAIN the plot dot —
+       an earlier revision clipped it against the base, which reads as a rendering fault
+       rather than as a mark. -->
+  <path d="M20 18 8.6 27.6v8.2h5.6v-6.6h11.6v6.6h5.6v-8.2Z" fill="url(#shelterMarkFill)" />
+  <!-- The monitored plot. What stops the roof reading as a plain chevron. -->
+  <circle cx="20" cy="32" r="2.5" fill="url(#shelterMarkFill)" />
+</svg>

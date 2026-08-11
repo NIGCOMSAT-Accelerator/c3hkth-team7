@@ -1,0 +1,575 @@
+name: shelter
+
+# All state lives in this stack. Postgres (PostGIS + pgvector + TimescaleDB),
+# MinIO and Dragonfly are reachable ONLY on the internal `shelter` network — none
+# of them publishes a host port. That is the point: the whole thing lifts onto any
+# VPS with `docker compose up -d` and exposes exactly one surface (the API on
+# :8000), so there is no separately-hardened datastore to forget about.
+#
+# For local development against these stores, use the override that re-publishes
+# their ports:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# THIS STACK IS THE BACKEND SERVICE. `docker compose up -d` starts the API, both
+# worker pools and all state; the `welcome` service then prints the URLs:
+#
+#     docker compose logs welcome
+#
+# The frontend is NOT included by default — it is commented out near the bottom of
+# this file. Netlify is the production frontend, and local frontend work wants
+# `npm run dev` (hot reload, and it needs port 3000 free). Uncomment that block only
+# if you specifically want the UI served from this stack.
+#
+networks:
+  shelter:
+    driver: bridge
+
+services:
+  # Dragonfly, Redis wire-compatible. db0 = job streams, db1 = cache.
+  #
+  # Flags differ from Redis and the differences matter:
+  #   --dbnum=4          Dragonfly defaults to ONE database. Without this,
+  #                      SELECT 1 fails and every cache call errors.
+  #   --cache_mode=false  No eviction. Eviction is server-wide, not per-database,
+  #                      so enabling it for db1's benefit would let the server
+  #                      drop db0 stream entries — a queued satellite scan that
+  #                      silently never runs. Bounded memory is instead enforced
+  #                      by app/store/cache.py requiring a TTL on every write.
+  #   --snapshot_cron     Dragonfly snapshots; it has no AOF. Every minute, so a
+  #                      restart loses at most a minute of queue state.
+  #
+  #                      FIVE crontab fields, and it MUST be one quoted argv entry.
+  #                      `*/1 * * * *` = every minute.
+  #
+  #                      This broke the whole stack once: dragonfly exited 1, which
+  #                      failed `depends_on` for api and both workers, so nothing
+  #                      started. The cause was a folded block (`>`) joining the lines
+  #                      with spaces — compose then word-split the result and the flag
+  #                      received only the first `*`, five bare `*` arguments trailing
+  #                      behind it.
+  #
+  #                      The error text is misleading and cost real debugging time:
+  #                      "cron expression must have six fields" counts the FLAG plus
+  #                      five fields, so a genuine six-field expression
+  #                      (`0 * * * * *`) is also rejected. Verified empirically against
+  #                      v1.25.1: `*/1 * * * *`, `0 0 * * *` and `*/5 * * * *` all
+  #                      start clean; six-field forms and `@every 1m` do not.
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.25.1
+    ulimits:
+      memlock: -1
+    # An explicit list, not a folded block. `>` joins lines with spaces and compose
+    # then word-splits the result, so `--snapshot_cron=* * * * * *` arrived as six
+    # separate arguments and the flag saw only the first `*`. Quoting the whole
+    # value keeps it as one argv entry.
+    command:
+      - --dbnum=4
+      - --cache_mode=false
+      # Dragonfly requires >=256MB per io thread and refuses to start otherwise:
+      # "There are 8 threads, so 2.00GiB are required. Exiting..." It sizes its thread
+      # pool from the host's core count, so 1gb worked on a small CI box and failed on
+      # a 12-core laptop — a machine-dependent startup failure, which is the worst kind
+      # to debug.
+      #
+      # Pinning the thread count rather than raising maxmemory to 2gb: the queue is
+      # low-throughput (a few jobs per AOI per 6-hour cycle), so 2 threads is ample,
+      # and it keeps the footprint predictable on any host. 1gb then satisfies the
+      # 256MB-per-thread floor with room to spare.
+      - --proactor_threads=2
+      - --maxmemory=1gb
+      - --dir=/data
+      - --dbfilename=dump
+      - "--snapshot_cron=*/1 * * * *"
+    volumes:
+      - dragonfly-data:/data
+    # No host port: internal-only. docker-compose.dev.yml adds one.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    networks: [shelter]
+
+  # Postgres with PostGIS, pgvector and TimescaleDB. The -ha image ships all
+  # three, which is why it's used instead of postgis/postgis plus manual builds.
+
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: shelter
+      POSTGRES_PASSWORD: shelter
+      POSTGRES_DB: shelter
+    volumes:
+      - postgres-data:/home/postgres/pgdata
+    # No host port: internal-only. docker-compose.dev.yml adds one.
+    healthcheck:
+      # -d as well as -U: without the database name, pg_isready reports ready
+      # while the init scripts are still creating it, and the API races them.
+      test: ["CMD-SHELL", "pg_isready -U shelter -d shelter"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+    networks: [shelter]
+
+  # MinIO — advisory voice notes, imagery crops, exports.
+  # Console on :9001. Credentials are dev-only; change them anywhere real.
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: shelter
+      MINIO_ROOT_PASSWORD: shelter-dev-secret
+    volumes:
+      - minio-data:/data
+    # No host port: internal-only. docker-compose.dev.yml adds one.
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [shelter]
+
+  api:
+    # `image:` alongside `build:` — both, deliberately.
+    #
+    # This is the one compose pattern that gives you every workflow from one file:
+    #
+    #   docker compose up -d          builds locally, TAGS the result as this name
+    #   docker compose pull           fetches it from the registry instead
+    #   docker compose up --no-build  runs the pulled image, never builds
+    #   make release                  pushes the same name/tag
+    #
+    # So a build on your machine and a pull on a VPS resolve to the same image
+    # reference, which is what makes the baked-in GeoIP database portable: build here
+    # once with `make geoip`, push, and every deployment has city lookup with no
+    # MaxMind key, no runtime download and no third-party call.
+    #
+    # ${SHELTER_IMAGE:-...} so a fresh clone with no .env still works — it falls back to a
+    # local tag that `docker compose up` will build.
+    #
+    # ONE SHARP EDGE, found by actually testing a fresh clone: because the fallback tag is a
+    # fixed name, a machine that ALREADY has `shelter-api:latest` will reuse it rather than
+    # build from the checkout. That is correct compose behaviour and usually what you want —
+    # but it means a `git pull` on a machine with a stale image can silently run old code.
+    #
+    # `make rebuild` is the answer and always forces a build. If you need to be certain from
+    # a bare compose invocation, `docker compose build api` first, or set SHELTER_TAG to
+    # something unique.
+    image: ${SHELTER_IMAGE:-shelter-api}:${SHELTER_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      # `required: false` so a fresh clone works with no .env at all —
+      # every setting has a working default and the keyless data sources need
+      # no credentials. Without this, `docker compose up` fails hard on a
+      # missing file, which is the first thing a new contributor would hit.
+      - path: .env
+        required: false
+    environment:
+      REDIS_URL: redis://dragonfly:6379/0
+      CACHE_URL: redis://dragonfly:6379/1
+      POSTGRES_DSN: postgresql://shelter:shelter@postgres:5432/shelter
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: shelter
+      S3_SECRET_KEY: shelter-dev-secret
+      S3_SECURE: "false"
+      # The API container owns migrations. Workers never migrate — see the
+      # advisory lock in app/db/migrations.py.
+      POSTGRES_AUTO_MIGRATE: "true"
+      # One scheduler only. It lives here; the workers must not also queue.
+      SCHEDULER_ENABLED: "true"
+
+      # --- LLM provider: swappable at runtime, no rebuild ---
+      #
+      # `env_file` above already loads these from .env. They are ALSO listed here
+      # with ${VAR:-default} so that:
+      #   1. a shell variable can override .env for a one-off run, and
+      #   2. `docker compose config` shows the resolved provider, which makes a
+      #      misconfiguration visible before a container starts rather than after.
+      #
+      # Everything above this block is pinned on purpose — those values must point
+      # at compose service names, so a .env edit MUST NOT change them. Everything
+      # in this block is the opposite: .env is authoritative.
+      #
+      # Swap providers:
+      #   edit .env  ->  docker compose up -d --force-recreate api worker
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MAX_TOKENS_PARAM: ${LLM_MAX_TOKENS_PARAM:-max_tokens}
+      LLM_SUPPORTS_TEMPERATURE: ${LLM_SUPPORTS_TEMPERATURE:-true}
+      LLM_STRUCTURED_OUTPUT_MODE: ${LLM_STRUCTURED_OUTPUT_MODE:-auto}
+      ADVISORY_PROVIDER: ${ADVISORY_PROVIDER:-auto}
+      ADVISORY_MODEL_OPENAI: ${ADVISORY_MODEL_OPENAI:-}
+    ports:
+      - "8000:8000"
+    # Declared here as well as in the Dockerfile, for two reasons:
+    #
+    #   1. It follows API_PREFIX. The image's own HEALTHCHECK does too (via an ENV
+    #      default), but a probe that hardcoded a path would 404 forever on any
+    #      deployment that changed the prefix — `welcome` would never print the URLs
+    #      and `frontend` would never be released, for a reason nothing explains.
+    #   2. `docker compose config` does not render image-level health checks, so a
+    #      reader auditing this file sees `welcome` wait on service_healthy with no
+    #      visible check to satisfy it.
+    #
+    # start_period covers migrations on first boot; failures before it elapses do
+    # not count toward retries.
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8000${API_PREFIX:-/shelter/v1/api}/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      # Trained weights, mounted read-only. Absent is fine — inference falls
+      # back to the documented threshold heuristics.
+      - ./backend/app/ml/weights:/app/app/ml/weights:ro
+      # NOTE: the GeoIP city database is deliberately NOT bind-mounted.
+      #
+      # It is baked into the image (`COPY data/ ./data/` in the Dockerfile), which is what
+      # makes a deployed container resolve cities with no host dependency. A bind mount here
+      # would SHADOW that: on any machine without ./backend/data populated, Docker would
+      # mount an empty directory over the database that is already in the image, and city
+      # lookup would silently stop working.
+      #
+      # To refresh the database: `make geoip && make rebuild`.
+
+    networks: [shelter]
+
+  # Scout + Oracle + Herald. Light, network-bound stages.
+
+  worker:
+    # The SAME image as the api service. One build, three roles: the entrypoint's first
+    # argument (`worker`) selects behaviour, so there is nothing worker-specific to build.
+    #
+    # Sharing the reference matters on a pull-based deployment: `docker compose pull` fetches
+    # one image rather than three identical copies, and a version skew between the api and a
+    # worker becomes impossible.
+    image: ${SHELTER_IMAGE:-shelter-api}:${SHELTER_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Fahis rides with these: it is network-bound like they are, and it runs at
+    # most a handful of times per cycle since verification is deferred by days.
+    # `worker` selects the entrypoint role: it validates configuration and waits
+    # for the API's migrations to land before consuming, which `depends_on:
+    # service_healthy` cannot do — Postgres accepting connections is not the same
+    # as the schema existing.
+    command: ["worker", "--stages", "scout,oracle,herald,fahis"]
+    env_file:
+      # `required: false` so a fresh clone works with no .env at all —
+      # every setting has a working default and the keyless data sources need
+      # no credentials. Without this, `docker compose up` fails hard on a
+      # missing file, which is the first thing a new contributor would hit.
+      - path: .env
+        required: false
+    environment:
+      REDIS_URL: redis://dragonfly:6379/0
+      CACHE_URL: redis://dragonfly:6379/1
+      POSTGRES_DSN: postgresql://shelter:shelter@postgres:5432/shelter
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: shelter
+      S3_SECRET_KEY: shelter-dev-secret
+      S3_SECURE: "false"
+      POSTGRES_AUTO_MIGRATE: "false"
+      SCHEDULER_ENABLED: "false"
+      # Same provider as the api container — the Herald runs advisory generation
+      # and Fahis runs adjudication here, so a provider swap must reach the
+      # workers too or the two halves disagree about which model is in use.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MAX_TOKENS_PARAM: ${LLM_MAX_TOKENS_PARAM:-max_tokens}
+      LLM_SUPPORTS_TEMPERATURE: ${LLM_SUPPORTS_TEMPERATURE:-true}
+      LLM_STRUCTURED_OUTPUT_MODE: ${LLM_STRUCTURED_OUTPUT_MODE:-auto}
+      ADVISORY_PROVIDER: ${ADVISORY_PROVIDER:-auto}
+      ADVISORY_MODEL_OPENAI: ${ADVISORY_MODEL_OPENAI:-}
+    # Disable the inherited healthcheck.
+    #
+    # The image's HEALTHCHECK curls the API's /ready endpoint, which is correct for the
+    # api service and impossible for a worker: a worker is a queue consumer and runs no
+    # web server, so the probe can never pass and the container sits permanently
+    # "unhealthy". That is worse than having no healthcheck — it trains an operator to
+    # ignore the one signal that would matter, and `docker compose ps` stops being a
+    # reliable read of whether the stack is well.
+    #
+    # Liveness for a worker is "the process is running and consuming", which the
+    # restart policy already handles: a crashed consumer exits and is restarted. Queue
+    # depth per stage is visible in /health on the api service.
+    healthcheck:
+      disable: true
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./backend/app/ml/weights:/app/app/ml/weights:ro
+
+    networks: [shelter]
+
+  # Analyst on its own: it does the COG reads and the forward passes, so it is
+  # the stage that needs to scale first. `--concurrency 2` because the work is
+  # I/O-bound on HTTP range requests rather than CPU-bound.
+
+  worker-analyst:
+    # The SAME image as the api service. One build, three roles: the entrypoint's first
+    # argument (`worker`) selects behaviour, so there is nothing worker-specific to build.
+    #
+    # Sharing the reference matters on a pull-based deployment: `docker compose pull` fetches
+    # one image rather than three identical copies, and a version skew between the api and a
+    # worker becomes impossible.
+    image: ${SHELTER_IMAGE:-shelter-api}:${SHELTER_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["worker", "--stages", "analyst", "--concurrency", "2"]
+    env_file:
+      # `required: false` so a fresh clone works with no .env at all —
+      # every setting has a working default and the keyless data sources need
+      # no credentials. Without this, `docker compose up` fails hard on a
+      # missing file, which is the first thing a new contributor would hit.
+      - path: .env
+        required: false
+    environment:
+      REDIS_URL: redis://dragonfly:6379/0
+      CACHE_URL: redis://dragonfly:6379/1
+      POSTGRES_DSN: postgresql://shelter:shelter@postgres:5432/shelter
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: shelter
+      S3_SECRET_KEY: shelter-dev-secret
+      S3_SECURE: "false"
+      POSTGRES_AUTO_MIGRATE: "false"
+      SCHEDULER_ENABLED: "false"
+      # Same provider as the api container — the Herald runs advisory generation
+      # and Fahis runs adjudication here, so a provider swap must reach the
+      # workers too or the two halves disagree about which model is in use.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MAX_TOKENS_PARAM: ${LLM_MAX_TOKENS_PARAM:-max_tokens}
+      LLM_SUPPORTS_TEMPERATURE: ${LLM_SUPPORTS_TEMPERATURE:-true}
+      LLM_STRUCTURED_OUTPUT_MODE: ${LLM_STRUCTURED_OUTPUT_MODE:-auto}
+      ADVISORY_PROVIDER: ${ADVISORY_PROVIDER:-auto}
+      ADVISORY_MODEL_OPENAI: ${ADVISORY_MODEL_OPENAI:-}
+    # Disable the inherited healthcheck.
+    #
+    # The image's HEALTHCHECK curls the API's /ready endpoint, which is correct for the
+    # api service and impossible for a worker: a worker is a queue consumer and runs no
+    # web server, so the probe can never pass and the container sits permanently
+    # "unhealthy". That is worse than having no healthcheck — it trains an operator to
+    # ignore the one signal that would matter, and `docker compose ps` stops being a
+    # reliable read of whether the stack is well.
+    #
+    # Liveness for a worker is "the process is running and consuming", which the
+    # restart policy already handles: a crashed consumer exits and is restarted. Queue
+    # depth per stage is visible in /health on the api service.
+    healthcheck:
+      disable: true
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    volumes:
+      - ./backend/app/ml/weights:/app/app/ml/weights:ro
+
+    networks: [shelter]
+
+  # NO SEARCH SERVICE HERE, deliberately.
+  #
+  # Fahis needs a web search backend to verify whether a warning was right. That backend is now an
+  # OPERATOR CHOICE, configured with `SEARCH_PROVIDER` and documented in the README:
+  #
+  #   SEARCH_PROVIDER=searxng   + SEARXNG_URL      — self-hosted, sovereignty-preserving
+  #   SEARCH_PROVIDER=tavily    + TAVILY_API_KEY   — managed, nothing to run
+  #   SEARCH_PROVIDER=none      (default)          — verdicts recorded as NOT_ATTEMPTED
+  #
+  # It was a `--profile search` service here, which cost nothing when unused but still pulled an
+  # image and carried a volume. Removing it keeps this file to what SHELTER itself needs — the
+  # datastores and the app — so `docker compose up` provisions the platform and nothing optional.
+  #
+  # Self-hosting SearXNG remains the sovereignty-preserving option, for the same reason MinIO and
+  # the Signal gateway are self-hosted: every verification query names a Nigerian district and a
+  # hazard, and routing that through a US SaaS endpoint cuts against the property the NIGCOMSAT
+  # layer exists to provide. That argument is ours to make, not one to impose on a tester who wants
+  # verification working in ten minutes.
+  #
+  # One gotcha worth keeping if you self-host: SearXNG's JSON API is OFF by default. A stock
+  # instance returns 403 for `?format=json`, and a Tavily-shaped POST returns an HTML page rather
+  # than JSON. Enable it with `search: {formats: [html, json]}` in its settings.yml.
+
+  # Optional: self-hosted Signal gateway.
+  # Enable with `docker compose --profile signal up`.
+  # First run needs a one-time device link — see README.
+
+  signal:
+    image: bbernhard/signal-cli-rest-api:latest
+    profiles: [signal]
+    environment:
+      MODE: native
+    ports:
+      - "8080:8080"
+    volumes:
+      - signal-data:/home/.local/share/signal-cli
+    restart: unless-stopped
+    networks: [shelter]
+
+  # ---------------------------------------------------------------------------
+  # The web UI — DISABLED BY DEFAULT. Uncomment the block below to run it here.
+  # ---------------------------------------------------------------------------
+  #
+  # This stack ships the BACKEND ONLY. `docker compose up -d` gives you the API,
+  # both worker pools and all state — a stable, self-contained backend service.
+  #
+  # The frontend is deliberately not part of it, for two reasons:
+  #
+  #   1. **Netlify is the production frontend** (`frontend/netlify.toml`). Running it
+  #      here as well means two deployment paths for the same app, and the container
+  #      one is the path nobody tests.
+  #   2. **Local frontend work wants `npm run dev`**, not a rebuilt image. Hot reload,
+  #      real error overlays, and a 2-second feedback loop instead of a Docker build.
+  #      A container in the default stack actively gets in the way of that — it holds
+  #      port 3000, so `npm run dev` fails to bind.
+  #
+  # For local frontend development (Node must be >=20 and <25 — Node 26 ships an npm
+  # that crashes here):
+  #
+  #     nvm use 24
+  #     cd frontend && npm install && npm run dev      # :3000
+  #
+  # To run it in this stack instead, uncomment the service below and:
+  #
+  #     docker compose up -d --build frontend
+  #
+  # SHELTER_API_URL points at the compose service name, not localhost: the browser
+  # never calls the API directly. `lib/api.ts` is `server-only` and runs inside the
+  # container, which is what keeps the API key off the client.
+  #
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #     args:
+  #       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+  #   environment:
+  #     SHELTER_API_URL: http://api:8000
+  #     SHELTER_API_PREFIX: ${API_PREFIX:-/shelter/v1/api}
+  #     # Must match API_KEY in .env, or every write is rejected. Read at request
+  #     # time, never baked into the image.
+  #     SHELTER_API_KEY: ${API_KEY:-}
+  #     # The address mail actually arrives from, shown on /auth/pending so a subscriber
+  #     # can allow-list it. Defaults to BREVO_SENDER_EMAIL so the portal cannot advise
+  #     # allow-listing an address the backend does not send from — which it did, naming a
+  #     # non-existent `alerts@shelter.zerorate.io`.
+  #     SHELTER_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-no-reply@zerorate.io}
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     api:
+  #       condition: service_started
+  #   restart: unless-stopped
+  #   networks: [shelter]
+
+  # Prints where to connect, once everything is actually healthy.
+  #
+  # `docker compose up -d` detaches, so nothing would otherwise tell a reviewer
+  # which URLs to open — they would have to read this file to find out. This service
+  # waits on the health checks, echoes the endpoints, and exits 0.
+  #
+  # Read it with:
+  #
+  #     docker compose logs welcome
+  #
+  # Deliberately a plain `echo` in busybox rather than a script file: no build step,
+  # ~4 MB, and nothing to keep in sync with the compose file it describes.
+  welcome:
+    image: busybox:1.37
+    depends_on:
+      api:
+        condition: service_healthy
+    # No restart: it prints once and exits. `unless-stopped` would loop forever.
+    restart: "no"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo ""
+        echo "  ═══════════════════════════════════════════════════════════════"
+        echo "   SHELTER · Satellite Hazard & Early-warning Local Tactical"
+        echo "             Emergency Response"
+        echo "   NIGCOMSAT × FreePass ZeroRate · Earth Observation for Africa"
+        echo "  ═══════════════════════════════════════════════════════════════"
+        echo ""
+        echo "   ✔ All services and dependencies are running."
+        echo ""
+        echo "     Postgres  system of record — PostGIS · pgvector · TimescaleDB"
+        echo "     Dragonfly job streams (db0) · cache (db1)"
+        echo "     MinIO     imagery cache · voice notes · exports"
+        echo "     API       REST surface + autonomous watch loop"
+        echo "     Workers   2 pools — Analyst isolated for COG reads"
+        echo ""
+        echo "   ✔ SHELTER AI agents are ACTIVE. Linear pipeline armed:"
+        echo ""
+        echo "       Scout ─▶ Analyst ─▶ Oracle ─▶ Herald"
+        echo "       discover  measure   decide    deliver"
+        echo "                                       │"
+        echo "                            Fahis ◀────┘  (verifies, days later)"
+        echo ""
+        echo "     Raw satellite Earth Observation ──▶ actionable intelligence."
+        echo "     The watch loop wakes every 6h and sweeps every subscriber"
+        echo "     unprompted — nobody has to trigger it."
+        echo ""
+        echo "  ───────────────────────────────────────────────────────────────"
+        echo "   Connect"
+        echo ""
+        echo "     API docs      http://localhost:8000/shelter/v1/api/docs"
+        echo "     Partner docs  http://localhost:8000/shelter/v1/api/dev-docs"
+        echo "     Health        http://localhost:8000/shelter/v1/api/health"
+        echo "     Frontend      cd frontend && nvm use 24 && npm run dev  (:3000)"
+        echo "                   not in this stack by design — see docker-compose.yml"
+        echo ""
+        echo "   Track A · Agricultural Intelligence is LIVE."
+        echo "   Environmental and Public Health Intelligence: next phase."
+        echo ""
+        echo "   First run: no subscribers yet, so the loop has nothing to scan."
+        echo "   Sign up in the portal to queue an immediate first scan."
+        echo ""
+        echo "     Logs    docker compose logs -f api worker"
+        echo "     Health  make health          Disk usage  make disk"
+        echo "     Rebuild make rebuild         Stop        docker compose down"
+        echo ""
+        echo "   Advisories fall back to English templates, and inference to"
+        echo "   documented physical thresholds, unless keys are set — both are"
+        echo "   deliberate: the service degrades to defensible science, never"
+        echo "   to silence. See .env.example."
+        echo "  ═══════════════════════════════════════════════════════════════"
+        echo ""
+    networks: [shelter]
+
+volumes:
+  dragonfly-data:
+  postgres-data:
+  minio-data:
+  signal-data:

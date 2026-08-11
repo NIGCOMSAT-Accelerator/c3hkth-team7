@@ -1,0 +1,68 @@
+# Build context exclusions.
+#
+# Docker's build context and git tracking are INDEPENDENT. `.gitignore` keeps a file out
+# of the repository; this file keeps it out of the image. A file can be in one, both, or
+# neither — and `backend/data/city.mmdb` is deliberately gitignored but NOT dockerignored,
+# so it ships in the image while never reaching GitHub.
+#
+# Everything below is excluded because it is either regenerable, machine-specific, or
+# large enough to slow every build for no runtime benefit.
+
+# Python bytecode and caches — regenerated on import, and a stale .pyc for a deleted
+# module can shadow the deletion.
+#
+# **`**/` is required.** A bare `__pycache__/` matches only at the CONTEXT ROOT, not in
+# subdirectories — dockerignore uses Go's filepath.Match semantics, not gitignore's. Measured
+# before this fix: the image carried 346 .pyc files from cpython-311, -312 and -314 (the host
+# venv and the system python) while the image itself runs 3.10. Inert, because Python rejects a
+# mismatched magic number — but stale bytecode from three foreign interpreters was being shipped
+# to production, and the pattern that was supposed to prevent it read as though it did.
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+
+# Local virtualenvs. Never useful in an image, and often gigabytes.
+**/.venv/
+**/venv/
+**/env/
+
+# Secrets. `.env` must NOT be baked in — compose injects it at runtime, so an image
+# carrying one would leak credentials to anyone who pulls it.
+.env
+.env.*
+!.env.example
+
+# Tests and notebooks. Excluded to keep the runtime image lean; CI runs them from the
+# source tree, not from the image.
+#
+# Consequence worth knowing: `docker compose exec api pytest` collects NOTHING, because the
+# image has no tests. Run them with the repo mounted instead —
+#   docker compose run --rm -v "$(pwd):/repo:ro" -w /repo/backend api python -m pytest
+# ...or locally after `make venv`.
+tests/
+notebooks/
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# ---------------------------------------------------------------------------
+# NOT excluded, and deliberately so
+# ---------------------------------------------------------------------------
+#
+#   data/city.mmdb        The IP -> city database. Gitignored (124MB, and DB-IP's
+#                         licence is CC-BY rather than something we can redistribute
+#                         in a public repo) but baked into the image so a deployed
+#                         container resolves cities with no runtime download and no
+#                         third-party call. Present only on machines that ran
+#                         `make geoip` — the build simply omits it elsewhere, and
+#                         `iam/geo.py` degrades to showing raw IPs.
+#
+#   app/ml/weights/*.pt   Same pattern: gitignored, shipped when present, and
+#                         inference falls back to documented physical thresholds
+#                         when absent.

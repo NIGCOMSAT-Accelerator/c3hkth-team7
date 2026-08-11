@@ -1,0 +1,116 @@
+# ---- Web / async core ----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# pydantic 2.12+ is REQUIRED, not merely preferred: pydantic-ai-slim 2.27.0
+# declares `pydantic>=2.12`, so the previous 2.10.4 pin made the two packages
+# uninstallable together and `pip install -r requirements.txt` failed with
+# ResolutionImpossible — i.e. the container image could not be built at all.
+# Verified together on python:3.10-slim-bookworm.
+pydantic==2.13.4
+pydantic-settings==2.8.1
+httpx==0.28.1
+python-multipart==0.0.20
+
+# ---- Queue / cache ----
+# One client, two logical databases: db0 carries the job streams, db1 the
+# cache. Works unchanged against Dragonfly, which speaks the Redis protocol.
+redis==5.2.1
+
+# ---- Persistence ----
+# asyncpg rather than psycopg because every caller here is already async and
+# the pipeline's hot paths must not block the event loop.
+asyncpg==0.30.0
+# Registers the `vector` type with asyncpg so embeddings round-trip as lists
+# instead of strings.
+pgvector==0.3.6
+
+# ---- IAM: identity, onboarding and API keys (app/iam/) ----
+# MongoDB Atlas is the identity store, deliberately separate from Postgres. See
+# app/iam/README-rationale in `store.py`: identity documents are read one-at-a-time
+# by id, never joined or queried spatially, and keeping credentials out of the
+# operational database means a read-replica or an analytics grant on Postgres cannot
+# reach a password hash.
+#
+# motor is the async driver (pure-python over pymongo's C extensions, which ship
+# manylinux wheels for x86_64 AND aarch64 — verified, so the ARM build does not
+# fall back to a source compile).
+motor==3.6.0
+pymongo==4.9.2
+
+# Argon2id for password hashing. NOT bcrypt: bcrypt silently truncates at 72 bytes
+# and has no memory-hardness, so a leaked hash is far cheaper to attack on GPUs.
+# Argon2 won the Password Hashing Competition and is the OWASP first choice.
+argon2-cffi==23.1.0
+
+# Short-lived portal session tokens. Stateless so a self-service login does not need
+# a session read on every request; the API-key path for aggregators is separate and
+# is validated against Atlas.
+pyjwt==2.10.1
+
+# RFC-compliant email validation with deliverability checks off (no DNS at signup —
+# it would make registration latency depend on a resolver).
+email-validator==2.2.0
+
+# TOTP (RFC 6238) for optional two-factor auth. Pure python, so the multi-arch build
+# is unaffected. Chosen over SMS codes: SIM swap is a live fraud pattern in the launch
+# market, and TOTP costs nothing per authentication.
+pyotp==2.10.0
+
+# ---- Object storage (MinIO / any S3-compatible) ----
+# The official SDK is synchronous; app/store/objects.py wraps every call in
+# asyncio.to_thread, the same pattern cog.py uses for rasterio.
+minio==7.2.12
+
+# ---- Deep learning ----
+# CPU wheels keep the image small; swap for the CUDA index in a GPU deployment.
+torch==2.5.1
+numpy==2.1.3
+
+# ---- Classical statistics (app/stats/) ----
+# The gamma fit behind SPI, the inverse normal CDF, and the incomplete gamma
+# function are the three things that cannot be hand-rolled reliably. Everything
+# else in app/stats/ is numpy. scipy is ~35 MB against torch's ~2 GB, so it is
+# noise in the image and removes the numerical code most likely to be subtly
+# wrong in a safety-critical path.
+scipy==1.14.1
+
+# ---- Geospatial / STAC / COG ----
+# rasterio reads windowed pixels straight out of Cloud-Optimized GeoTIFFs over
+# HTTP range requests, so we never download a whole satellite scene.
+pystac-client==0.8.5
+rasterio==1.4.3
+shapely==2.0.6
+pyproj==3.7.0
+planetary-computer==1.0.0
+
+# ---- Agentic LLM surfaces (chat + verification only) ----
+# `-slim` with the `openai` extra rather than the full `pydantic-ai` meta-package:
+# we only ever speak OpenAI-compatible /v1/chat/completions, so pulling the
+# Anthropic/Gemini/Bedrock/Cohere/Mistral model adapters would add install weight
+# for code paths that can never execute.
+#
+# Scoped to Herald chat and Fahis adjudication. Scout, Analyst and Oracle do
+# deterministic local maths over PyTorch weights and never call a model — a
+# framework has nothing to offer them, and keeping it out of `app/eo/` and
+# `app/ml/` is what keeps the risk model reproducible and testable without it.
+pydantic-ai-slim[openai]==2.27.0
+
+# ---- Advisory generation ----
+# OPTIONAL. Only needed for ADVISORY_PROVIDER=anthropic, which buys server-side
+# fallback and effort control. The default portable path speaks plain
+# /v1/chat/completions over httpx and needs nothing here — including when
+# pointed at Anthropic's own OpenAI-compatible endpoint.
+anthropic==0.68.0
+
+# ---- Dev / test ----
+pytest==8.3.4
+pytest-asyncio==0.25.2
+ruff==0.8.6
+
+# Reads the local GeoLite2 database for the portal's IP -> city display.
+#
+# Small and pure-Python (it is an mmdb reader, not a service client). Listed as a hard
+# requirement rather than an extra because `iam/geo.py` imports it lazily and degrades when
+# the DATABASE is missing — which is the condition that actually varies. Making the library
+# optional too would add a second failure mode for no benefit.
+geoip2==5.1.0

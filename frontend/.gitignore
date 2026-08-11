@@ -1,0 +1,8 @@
+
+# MapLibre's worker bundle, copied into public/ by scripts/copy-map-worker.mjs.
+#
+# A build artefact of a pinned dependency, so it is generated rather than committed — a
+# committed copy would silently disagree with the lockfile after an upgrade, and the symptom
+# (a worker from the old version) is very hard to attribute.
+public/maplibre-gl-worker.mjs
+public/maplibre-gl-shared.mjs

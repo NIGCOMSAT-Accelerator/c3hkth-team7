@@ -1,0 +1,23 @@
+# Keep the build context small and, more importantly, keep secrets out of it.
+#
+# `.env.local` holds SHELTER_API_KEY, which authorises subscriber registration and
+# satellite broadcasts. A build context is readable by every layer, so an
+# accidentally-copied env file is a leaked key even if no Dockerfile line
+# references it.
+
+node_modules
+.next
+out
+.netlify
+
+.env
+.env.local
+.env.*.local
+
+*.tsbuildinfo
+next-env.d.ts
+
+.git
+.DS_Store
+Dockerfile
+.dockerignore

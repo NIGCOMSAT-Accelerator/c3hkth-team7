@@ -1,0 +1,68 @@
+# --- Secrets ---
+.env
+.env.local
+.env.*.local
+# Timestamped copies made before editing .env — same secrets, so same rule.
+.env.backup-*
+.env.bak
+*.pem
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# --- Model weights & EO cache (large binaries, never commit) ---
+backend/app/ml/weights/*.pt
+backend/app/ml/weights/*.pth
+backend/.cache/
+data/
+*.tif
+*.tiff
+*.nc
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.netlify/
+next-env.d.ts
+*.tsbuildinfo
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Local working notes (not for the public repo) ---
+# CLAUDE.md carries the architecture notes and invariants; docs/ holds the design
+# reviews and audits. Both are personal working material — README.md is the only
+# documentation intended for collaborators, so anything a reader outside this repo
+# needs has to live there rather than being referenced out to docs/.
+CLAUDE.md
+.claude/
+docs/
+
+# --- Notebook training artefacts ---
+# The fine-tuning notebook caches ~400 MB of Sen1Floods11 chips beside itself and
+# writes its own venv. The .pt output is already covered above; these are the rest.
+backend/notebooks/sen1floods11/
+backend/notebooks/.venv/
+backend/notebooks/.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# --- Generated API clients ---
+# `make openapi-client` writes here. The SPEC (openapi.json) is committed because it
+# is the contract and its diff is the review surface; the generated client is a build
+# artefact reproducible from it, and committing thousands of generated files would
+# bury every real change.
+clients/
+backend/data/*.mmdb

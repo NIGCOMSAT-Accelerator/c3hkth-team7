@@ -1,0 +1,49 @@
+# Local development override — re-publishes the datastore ports.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#     make dev
+#
+# The base stack deliberately keeps Postgres, MinIO and Dragonfly on the internal
+# network only, so a VPS install exposes one surface. That is right for deployment
+# and wrong for development: running the app on the host against these stores
+# (README §4.4), pointing `psql` at the database, or opening the MinIO console all
+# need a host port.
+#
+# NEVER apply this file on a public host. Postgres and MinIO here use the
+# dev-default credentials committed in the base file (shelter / shelter,
+# shelter / shelter-dev-secret) — publishing those ports on a VPS hands over the
+# whole datastore. If you need remote access to a deployed stack, tunnel it:
+#
+#     ssh -L 5432:localhost:5432 user@vps    # then compose exec, not this file
+#
+# There is no `api` entry: the base file already publishes :8000, and overriding it
+# here would just duplicate that.
+
+services:
+  dragonfly:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  minio:
+    ports:
+      # S3 API.
+      - "127.0.0.1:9000:9000"
+      # Web console.
+      - "127.0.0.1:9001:9001"
+
+# No `searxng:` block here. It was removed from docker-compose.yml when web search became
+# opt-in via SEARCH_PROVIDER, and an override for a service the base file does not define is a
+# hard compose error — "service searxng has neither an image nor a build context specified".
+# That broke `make dev` and `make validate` outright, not just this profile.
+#
+# If you self-host SearXNG again, add the service to the base file first; the override may then
+# publish 127.0.0.1:8888:8080 alongside the datastores above.
+
+# Bound to 127.0.0.1 rather than 0.0.0.0 on purpose. A bare "5432:5432" listens on
+# every interface, which on a cloud VM with a permissive security group is an open
+# database — the exact exposure the base file removes. Loopback binding keeps the
+# port reachable from the host's own tooling and nothing else.

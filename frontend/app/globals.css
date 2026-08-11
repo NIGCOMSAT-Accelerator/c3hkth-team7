@@ -1,0 +1,5300 @@
+/* ==========================================================================
+   SHELTER design tokens
+
+   Brand values are lifted from the FreePass / ZeroRate design system so this
+   reads as part of the same family:
+     brand-600 #6a0dad · brand-500 #9a2ce9 · brand-400 #b86bf2
+     ink #0b001b · ink-soft #140023 · hairline #3407561a
+
+   The --viz-* series colors are NOT brand values. They were selected and then
+   validated for colorblind separation and surface contrast in both modes
+   (worst-adjacent CVD ΔE 23.3 light / 22.2 dark; all steps ≥ 3:1). Do not
+   substitute brand purple for the rainfall series — purple↔blue is the classic
+   protan/deutan confusion pair, which is why rainfall is aqua.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Brand ramp */
+  --brand-50: #f8f2ff;
+  --brand-100: #f2e0ff;
+  --brand-200: #e6ccff;
+  --brand-300: #d4a8ff;
+  --brand-400: #b86bf2;
+  --brand-500: #9a2ce9;
+  --brand-600: #6a0dad;
+  --brand-700: #5a0ba0;
+  --brand-900: #340756;
+  --brand-950: #19002c;
+
+  /* Surfaces & ink */
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f8f2ff;
+  --hairline: #3407561a;
+  --hairline-strong: #34075629;
+
+  --text-primary: #0b001b;
+  --text-secondary: #364153;
+  --text-muted: #6a7282;
+
+  --accent: var(--brand-600);
+  --accent-hover: var(--brand-700);
+  --on-accent: #ffffff;
+
+  /* Validated series colors — see header note */
+  --viz-risk: #9a2ce9;
+  --viz-risk-fill: #9a2ce91f;
+  --viz-rain: #0f8f63;
+  --viz-grid: #34075614;
+  --viz-axis: #6a7282;
+
+  /* Severity status — reserved. Always shipped with an icon AND a text label,
+     never color alone. All steps clear AA text contrast on this surface. */
+  --sev-info: #4a5565;
+  --sev-advisory: #6a0dad;
+  --sev-watch: #a16207;
+  --sev-warning: #c2410c;
+  --sev-emergency: #b42318;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-card: 0 1px 2px #3407560d, 0 8px 24px #34075610;
+
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark steps are selected for the dark surface, not an automatic flip. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface: #0b001b;
+    --surface-raised: #140023;
+    --surface-sunken: #19002c;
+    --hairline: #ffffff1a;
+    --hairline-strong: #ffffff2e;
+
+    --text-primary: #ffffff;
+    --text-secondary: #d1d5dc;
+    --text-muted: #99a1af;
+
+    --accent: var(--brand-400);
+    --accent-hover: #cd94ff;
+    --on-accent: #19002c;
+
+    --viz-risk: #a855f7;
+    --viz-risk-fill: #a855f726;
+    --viz-rain: #199e70;
+    --viz-grid: #ffffff14;
+    --viz-axis: #99a1af;
+
+    --sev-info: #a8b0bd;
+    --sev-advisory: #c07eff;
+    --sev-watch: #e8b339;
+    --sev-warning: #ff8c52;
+    --sev-emergency: #ff6b5e;
+
+    --shadow-card: 0 1px 2px #00000066, 0 8px 24px #00000040;
+  }
+}
+
+/* The viewer's toggle must beat the OS setting in both directions. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface: #0b001b;
+  --surface-raised: #140023;
+  --surface-sunken: #19002c;
+  --hairline: #ffffff1a;
+  --hairline-strong: #ffffff2e;
+
+  --text-primary: #ffffff;
+  --text-secondary: #d1d5dc;
+  --text-muted: #99a1af;
+
+  --accent: var(--brand-400);
+  --accent-hover: #cd94ff;
+  --on-accent: #19002c;
+
+  --viz-risk: #a855f7;
+  --viz-risk-fill: #a855f726;
+  --viz-rain: #199e70;
+  --viz-grid: #ffffff14;
+  --viz-axis: #99a1af;
+
+  --sev-info: #a8b0bd;
+  --sev-advisory: #c07eff;
+  --sev-watch: #e8b339;
+  --sev-warning: #ff8c52;
+  --sev-emergency: #ff6b5e;
+
+  --shadow-card: 0 1px 2px #00000066, 0 8px 24px #00000040;
+}
+
+/* ---------------------------------------------------------------- base -- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------------------------- layout -- */
+
+.shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.topbar {
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: saturate(180%) blur(8px);
+}
+
+.topbar__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 64px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  font-size: 17px;
+}
+.brand:hover {
+  text-decoration: none;
+}
+
+.brand__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(140deg, var(--brand-500), var(--brand-700));
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 14px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  font-size: 14px;
+}
+.nav a {
+  color: var(--text-secondary);
+}
+.nav a:hover {
+  color: var(--text-primary);
+}
+
+.footer {
+  border-top: 1px solid var(--hairline);
+  margin-top: 72px;
+  padding: 40px 0 28px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Single column by default and only splitting at 900px. Mobile-first because the
+   target user is on a phone: a desktop-first grid would need overrides at the small
+   size, which is where correctness matters most here. */
+.footer__grid {
+  display: grid;
+  gap: 32px;
+}
+
+.footer__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.footer__tagline {
+  margin: 0;
+  max-width: 42ch;
+  line-height: 1.6;
+}
+
+.footer__cols {
+  display: grid;
+  gap: 28px;
+}
+
+.footer__col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer__heading {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.footer__col a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.footer__col a:hover,
+.footer__col a:focus-visible {
+  color: var(--accent);
+}
+
+/* Not a link: these are claims about how the service works, and making them
+   look clickable would promise a page that does not exist. */
+.footer__fact {
+  line-height: 1.55;
+  max-width: 34ch;
+}
+
+.footer__legal {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.footer__legal p {
+  margin: 0;
+  line-height: 1.6;
+  max-width: 78ch;
+}
+
+@media (min-width: 900px) {
+  /* Brand block takes the larger share now that the link columns are two rather
+     than three — at 1.1fr / 1.4fr the two remaining columns stretched wide enough
+     that four short link labels floated in mostly empty space. */
+  .footer__grid {
+    grid-template-columns: 1.35fr 1fr;
+    gap: 56px;
+  }
+
+  .footer__cols {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ------------------------------------------------------- brand logo -- */
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.logo__mark {
+  flex: none;
+  color: var(--accent);
+  /* The viewBox carries 4px of built-in inset, so no margin here — adding one would
+     double the optical padding and push the wordmark visually off-centre. */
+}
+
+.logo__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.logo__word {
+  font-weight: 700;
+  /* Wide tracking is what makes a short all-caps wordmark read as a logotype rather
+     than as shouted body text. */
+  letter-spacing: 0.14em;
+  line-height: 1;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.logo__tagline {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  line-height: 1.35;
+  color: var(--text-muted);
+  max-width: 32ch;
+}
+
+/* ------------------------------------------------ partner attribution -- */
+
+.partners {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.partners__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.partners__row {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* A hairline, not a "×". A divider separates two marks without implying arithmetic
+   between them, which is what partner lockups conventionally use. */
+.partners__divider {
+  width: 1px;
+  height: 18px;
+  background: var(--hairline-strong);
+  flex: none;
+}
+
+/* --- The FreePass wordmark: one inlined asset, both themes ---------------
+   `currentColor` is why the supplied grayscale variant does not need to ship as a
+   second file. Muted here so partner marks support the SHELTER logo rather than
+   compete with it; full brand purple on hover, for anyone actually looking at the
+   attribution. In dark mode it lifts to a light neutral, which is the same
+   relationship inverted — not a different design. */
+.partners__logo--word {
+  color: var(--text-muted);
+  transition: color 160ms ease;
+}
+
+.partners:hover .partners__logo--word {
+  color: var(--brand-500);
+}
+
+/* The NIGCOMSAT emblem is a raster and dark-on-transparent, so it vanishes against a
+   dark surface. Inverted in CSS rather than shipped as a second PNG: one source of
+   truth, and a hand-inverted duplicate would drift when the brand updates. */
+.partners__logo--emblem {
+  height: auto;
+  width: auto;
+  opacity: 0.78;
+  transition: opacity 160ms ease;
+}
+
+.partners:hover .partners__logo--emblem {
+  opacity: 1;
+}
+
+[data-theme="dark"] .partners__logo--emblem {
+  filter: brightness(0) invert(1);
+  opacity: 0.72;
+}
+
+[data-theme="dark"] .partners:hover .partners__logo--emblem {
+  opacity: 0.95;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .partners__logo--emblem {
+    filter: brightness(0) invert(1);
+    opacity: 0.72;
+  }
+
+  :root:not([data-theme="light"]) .partners:hover .partners__logo--emblem {
+    opacity: 0.95;
+  }
+}
+
+.nav__partners {
+  display: none;
+}
+
+/* Shown only where the header genuinely has room. Below this the lockup plus four nav
+   items cannot share a row without wrapping, and the footer carries the same
+   attribution with space to state the relationship in words. */
+@media (min-width: 1024px) {
+  .nav__partners {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 8px;
+    padding-right: 18px;
+    border-right: 1px solid var(--hairline);
+  }
+}
+
+.nav__cta {
+  background: var(--accent);
+  color: #fff !important;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  transition: filter 120ms ease;
+}
+
+.nav__cta:hover,
+.nav__cta:focus-visible {
+  filter: brightness(1.08);
+}
+
+/* -------------------------------------------------------------- cards -- */
+
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-card);
+}
+
+.card__title {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 2px;
+}
+
+.card__sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 18px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+.grid--tiles {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.grid--split {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 900px) {
+  .grid--split {
+    grid-template-columns: 1.6fr 1fr;
+  }
+}
+
+/* --------------------------------------------------------- stat tiles -- */
+
+.tile {
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.tile__label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+.tile__value {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+}
+
+/* ----------------------------------------------------------- severity -- */
+
+.sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.sev__icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.sev--info { color: var(--sev-info); }
+.sev--advisory { color: var(--sev-advisory); }
+.sev--watch { color: var(--sev-watch); }
+.sev--warning { color: var(--sev-warning); }
+.sev--emergency { color: var(--sev-emergency); }
+
+/* ------------------------------------------------------------ buttons -- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.btn:hover {
+  text-decoration: none;
+}
+.btn--primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.btn--primary:hover {
+  background: var(--accent-hover);
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: var(--hairline-strong);
+}
+.btn--ghost:hover {
+  background: var(--surface-sunken);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------- forms -- */
+
+.field {
+  display: block;
+  margin-bottom: 18px;
+}
+.field__label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.field__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 5px;
+}
+.input,
+.select {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm);
+}
+.input:focus,
+.select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.checkrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+/* -------------------------------------------------------------- misc -- */
+
+.muted {
+  color: var(--text-muted);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.evidence {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.evidence li {
+  margin-bottom: 6px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+.table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------- service status -- */
+/*
+   Capability-level status, not a component grid. Every state carries an icon AND a
+   text label — colour is reinforcement only, the same rule SeverityBadge follows and
+   the reason the severity palette ships with icons.
+
+   The three state colours are deliberately NOT the --viz-* series: those were
+   validated for chart separation, and reusing them here would imply a relationship
+   between a status dot and a data series that does not exist.
+*/
+
+.status {
+  --status-color: var(--ok, #0f8f63);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.status[data-level="degraded"] {
+  --status-color: #dd7400;
+}
+
+.status[data-level="unavailable"] {
+  --status-color: #b42318;
+}
+
+.status--loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.status__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.status__head:hover {
+  background: var(--surface-hover, rgba(106, 13, 173, 0.04));
+}
+
+/* A visible focus ring rather than the browser default, which is invisible against
+   the raised surface in dark mode. */
+.status__head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.status__dot {
+  color: var(--status-color);
+  font-size: 15px;
+  line-height: 1;
+  flex: none;
+}
+
+.status__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.status__level {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--status-color);
+  letter-spacing: 0.01em;
+}
+
+.status__summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.status__chevron {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex: none;
+}
+
+.status__body {
+  border-top: 1px solid var(--hairline);
+  padding: 14px 16px 16px;
+}
+
+.status__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.status__item {
+  --status-color: var(--ok, #0f8f63);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.status__item[data-level="degraded"] {
+  --status-color: #dd7400;
+}
+
+.status__item[data-level="unavailable"] {
+  --status-color: #b42318;
+}
+
+.status__item-dot {
+  color: var(--status-color);
+  font-size: 12px;
+  line-height: 1.5;
+  flex: none;
+}
+
+.status__item-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.status__item-state {
+  font-weight: 500;
+  color: var(--status-color);
+}
+
+.status__item-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* Aggregator-only operational detail. Two columns so label/value pairs align without
+   a table, which would be the wrong semantics for what is really a definition list. */
+.status__ops {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.status__ops-label {
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10px;
+  align-self: center;
+}
+
+.status__ops-value {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.status__checked {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------ intelligence flow -- */
+/*
+   The hero animation. Motion carries meaning here — the satellite pass starts a cycle,
+   the radar sweep is the cloud-penetration claim, the pipeline pulse is the fixed linear
+   sequence — so with reduced-motion the diagram stays and only the movement stops.
+
+   Every animation is on transform/opacity only, which the compositor handles off the
+   main thread. An animated `r` or `cx` would force layout on every frame and make the
+   page janky on the low-end Android this is aimed at.
+*/
+
+.flowviz {
+  color: var(--accent);
+  width: 100%;
+}
+
+.flowviz__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Caps the height on very wide screens so the hero does not become a banner. Raised
+     from 340 to 400 when the viewBox grew to 392 for the Fahis arc and the NIGCOMSAT
+     uplink — leaving it at 340 would have scaled the whole diagram down to fit, making
+     the 8.5px stage labels illegible. */
+  max-height: 400px;
+}
+
+.flowviz__stage {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  fill: var(--text-secondary);
+}
+
+.flowviz__note {
+  font-size: 8.5px;
+  fill: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+/* --- the satellite ------------------------------------------------------ */
+.flowviz__sat {
+  color: var(--accent);
+}
+
+/* --- radar sweep: expands through the cloud band ------------------------ */
+@keyframes flowviz-sweep {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(3.6);
+    opacity: 0;
+  }
+}
+
+.flowviz__sweep {
+  transform-origin: 355px 70px;
+  transform-box: fill-box;
+  animation: flowviz-sweep 3.4s ease-out infinite;
+}
+
+/* A second ring offset by half the cycle, so the sweep reads as continuous rather
+   than as a single repeating blink. */
+.flowviz__sweep--b {
+  animation-delay: 1.7s;
+}
+
+/* --- downlink packets --------------------------------------------------- */
+@keyframes flowviz-packet {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(150px);
+    opacity: 0;
+  }
+}
+
+.flowviz__packet {
+  animation: flowviz-packet 2.6s linear infinite;
+}
+
+.flowviz__packet--b {
+  animation-delay: 1.3s;
+}
+
+/* --- the monitored plot ------------------------------------------------- */
+@keyframes flowviz-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(4.5);
+    opacity: 0;
+  }
+}
+
+.flowviz__ping {
+  transform-origin: 355px 226px;
+  transform-box: fill-box;
+  animation: flowviz-ping 3s ease-out infinite;
+}
+
+/* --- pipeline nodes firing in sequence ---------------------------------- */
+@keyframes flowviz-node {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  12%,
+  30% {
+    opacity: 1;
+    transform: scale(1.45);
+  }
+}
+
+.flowviz__node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: flowviz-node 3.6s ease-in-out infinite;
+}
+
+/* The pulse travels the full 528px of the pipeline rail. Its duration matches the
+   node cycle so the pulse arrives as each node fires, rather than drifting out of
+   phase over time. */
+@keyframes flowviz-pulse {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(528px);
+    opacity: 0;
+  }
+}
+
+.flowviz__pulse {
+  animation: flowviz-pulse 3.6s linear infinite;
+}
+
+/* --- alert arriving at the household ----------------------------------- */
+@keyframes flowviz-alert {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.flowviz__alert {
+  transform-box: fill-box;
+  transform-origin: center;
+  /* Delayed to land after the pipeline pulse completes, so the sequence reads
+     satellite -> pipeline -> household rather than everything at once. */
+  animation: flowviz-alert 3.6s ease-out 2.4s infinite;
+}
+
+.flowviz__alert--b {
+  animation-delay: 3.2s;
+}
+
+/* --- Fahis: the verdict travelling backwards ----------------------------- */
+/*
+   Reverse direction and a deliberately slower cycle (9s against the pipeline's 3.6s).
+   Both encode real properties: verification runs days after the scan, and it runs
+   against the flow. Matching the forward pulse's speed would read as part of the
+   pipeline, which is the one thing this must not imply.
+
+   The 528px -> 176px travel mirrors the arc's endpoints, so the dot tracks the dashed
+   path rather than floating beside it.
+*/
+@keyframes flowviz-verdict {
+  0%,
+  10% {
+    transform: translate(528px, 0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.9;
+  }
+  30% {
+    transform: translate(430px, 40px);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translate(352px, 46px);
+  }
+  70% {
+    transform: translate(274px, 40px);
+    opacity: 0.9;
+  }
+  88% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translate(176px, 0);
+    opacity: 0;
+  }
+}
+
+.flowviz__verdict {
+  animation: flowviz-verdict 9s ease-in-out 1.5s infinite;
+}
+
+/* The Fahis label is dimmer than the four pipeline stages. It is a real part of the
+   system but not part of the delivery path, and equal weight would flatten that
+   distinction. */
+.flowviz__stage--verify {
+  fill: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+/* --- NIGCOMSAT broadcast burst ------------------------------------------ */
+/*
+   Position is driven by `animateMotion` along #flowUplink, so this only handles the
+   fade. Splitting it that way keeps the beam geometry and the burst path in one place —
+   editing the arc moves the burst automatically.
+*/
+@keyframes flowviz-burst {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+}
+
+.flowviz__burst {
+  animation: flowviz-burst 4.2s linear 1.2s infinite;
+}
+
+/* Reduced motion: the diagram remains fully legible, only the movement stops. The
+   satellite is parked mid-pass and the sweep/ping rings are hidden rather than frozen
+   mid-expansion, which would look like a rendering bug. */
+@media (prefers-reduced-motion: reduce) {
+  .flowviz__sweep,
+  .flowviz__packet,
+  .flowviz__ping,
+  .flowviz__pulse,
+  .flowviz__alert,
+  .flowviz__verdict,
+  .flowviz__burst {
+    animation: none;
+  }
+
+  /* Hidden rather than frozen. A ring parked mid-expansion reads as a rendering fault,
+     and a lone travelling dot stopped in empty space reads as a stray mark. The dashed
+     Fahis arc and the uplink beam are static geometry, so both explanations survive
+     without their moving parts. */
+  .flowviz__sweep,
+  .flowviz__ping,
+  .flowviz__alert,
+  .flowviz__verdict,
+  .flowviz__burst {
+    display: none;
+  }
+
+  .flowviz__node {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+/* --------------------------------------------------------- tracks -- */
+/*
+   The three intelligence tracks. Agricultural is live; the other two are next phase and
+   say so explicitly — an unlabelled "coming soon" card reads as a broken link, and a
+   card with no state at all reads as a false promise.
+*/
+
+.tracks {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 860px) {
+  .tracks {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.track {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface-raised);
+  transition: border-color 160ms ease;
+}
+
+.track[data-state="live"] {
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+/* The two forthcoming tracks are held back visually so the live one leads the eye —
+   but not so far that they read as disabled, because they are real roadmap. */
+.track[data-state="next"] {
+  opacity: 0.72;
+}
+
+.track:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.track__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.track__icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.track__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.track__badge {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.track[data-state="live"] .track__badge {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.track[data-state="next"] .track__badge {
+  background: var(--surface-sunken, rgba(0, 0, 0, 0.04));
+  color: var(--text-muted);
+}
+
+.track__lede {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.track__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+}
+
+.track__list li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* A geometric marker rather than a disc bullet: it aligns to the text baseline and
+   matches the severity-badge iconography used elsewhere. */
+.track__list li::before {
+  content: "▪";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  opacity: 0.5;
+}
+
+/* The hero animation needs breathing room from the CTAs above it, and a hairline to
+   separate it from the tracks below without adding a heavy divider. */
+.hero__flow {
+  margin: 44px 0 8px;
+  padding-top: 28px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ------------------------------------------------------ auth shell -- */
+/*
+   Split screen: story left, form right. The left panel is HIDDEN below 900px rather than
+   stacked above the form — stacking would push the email field below the fold on a
+   360px screen, which is the one thing that must never happen on a sign-in page.
+*/
+
+.authshell {
+  display: grid;
+  min-height: calc(100vh - 64px);
+  /* Single column by default; the panel appears only where there is room. */
+  grid-template-columns: 1fr;
+}
+
+.authshell__story {
+  display: none;
+}
+
+.authshell__panel {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px 64px;
+}
+
+.authshell__panel-inner {
+  width: 100%;
+  max-width: 420px;
+}
+
+@media (min-width: 900px) {
+  .authshell {
+    grid-template-columns: 1.05fr 1fr;
+  }
+
+  .authshell__story {
+    display: block;
+    /* A faint brand wash rather than a solid fill: a saturated panel next to a white
+       form makes the form look like the secondary element. */
+    background:
+      radial-gradient(
+        120% 80% at 20% 0%,
+        color-mix(in srgb, var(--accent) 10%, transparent),
+        transparent 70%
+      ),
+      var(--surface-sunken, #fbf8ff);
+    border-right: 1px solid var(--hairline);
+    padding: 56px 48px;
+  }
+
+  .authshell__story-inner {
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    /* Sticky so the story stays visible while a long signup form scrolls. */
+    position: sticky;
+    top: 56px;
+  }
+
+  .authshell__panel {
+    padding: 56px 48px 80px;
+    align-items: center;
+    min-height: calc(100vh - 64px);
+  }
+}
+
+.authshell__headline {
+  margin: 0;
+  font-size: clamp(21px, 2.1vw, 27px);
+  font-weight: 700;
+  line-height: 1.32;
+  letter-spacing: -0.01em;
+  max-width: 26ch;
+}
+
+.authshell__flow {
+  margin: 0;
+}
+
+.authshell__tracks {
+  display: grid;
+  gap: 8px;
+}
+
+.authshell__track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  font-size: 13px;
+}
+
+.authshell__track[data-state="live"] {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+/* Held back, not disabled: these are real roadmap, not dead options. */
+.authshell__track[data-state="next"] {
+  opacity: 0.66;
+}
+
+.authshell__track-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* State as text, never colour alone. */
+.authshell__track-state {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.authshell__track[data-state="live"] .authshell__track-state {
+  color: var(--accent);
+}
+
+.authshell__partners {
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ------------------------------------------------------ auth panel -- */
+
+.authpanel__title {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 3vw, 30px);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+.authpanel__lede {
+  margin: 0 0 24px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.authpanel__kindnote {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-sunken, rgba(106, 13, 173, 0.04));
+}
+
+.authpanel__alt {
+  margin: 22px 0 0;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.authpanel__alt a,
+.authpanel__link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.authpanel__alt a:hover,
+.authpanel__link:hover {
+  text-decoration: underline;
+}
+
+.authpanel__link {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------- auth tabs -- */
+/*
+   Real tab semantics (`role="tablist"` / `aria-selected`) rather than styled links, so a
+   screen reader announces the selected method instead of reading two navigation options
+   with no indication of which is active.
+*/
+
+.authtabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-sunken, rgba(0, 0, 0, 0.02));
+}
+
+.authtabs__tab {
+  flex: 1;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font: 600 13px/1.2 inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.authtabs__tab[aria-selected="true"] {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgba(11, 0, 27, 0.06);
+}
+
+.authtabs__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------- auth form -- */
+
+.authform {
+  display: grid;
+  gap: 16px;
+}
+
+.authform__row {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 480px) {
+  .authform__row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.authform__field {
+  display: grid;
+  gap: 6px;
+}
+
+.authform__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.authform__optional {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.authform__input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  /* 16px minimum: iOS Safari zooms the viewport on focus for anything smaller, which on
+     a phone throws the user out of the form layout entirely. */
+  font: 400 16px/1.4 inherit;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.authform__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.authform__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.authform__hint--warn {
+  color: var(--sev-warning);
+}
+
+/* ------------------------------------------------ password entry -- */
+/*
+   Live validation UI: show/hide toggle, strength read-out, requirement checklist.
+
+   The whole point is that a subscriber learns a password is too short at keystroke 4
+   rather than after a round trip that returns a raw Pydantic error — see PasswordField.
+*/
+.pwfield {
+  position: relative;
+}
+
+.pwfield__input {
+  /* Room for the toggle, so a long password does not run underneath it. */
+  padding-right: 62px;
+}
+
+.pwfield__toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 12px/1 inherit;
+  cursor: pointer;
+}
+
+.pwfield__toggle:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.pwfield__toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- strength read-out --------------------------------------------------- */
+.pwmeter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 8px;
+}
+
+/*
+   A single track whose filled width is set per level, rather than four separate segments.
+   Segments imply a precise score; this is a coarse four-band hint and should look like one.
+*/
+.pwmeter__bar {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--hairline-strong);
+  overflow: hidden;
+}
+
+.pwmeter__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  transition: width 180ms ease, background-color 180ms ease;
+}
+
+/* Green at every passing level, not a red-amber-green ramp. Once the two hard rules are
+   met the password is acceptable — colouring "Acceptable" red would contradict the form,
+   which has already stopped objecting. Length only ever adds reassurance. */
+.pwmeter__bar--1::after {
+  width: 40%;
+  background: color-mix(in srgb, var(--viz-rain) 55%, var(--hairline-strong));
+}
+
+.pwmeter__bar--2::after {
+  width: 70%;
+  background: color-mix(in srgb, var(--viz-rain) 78%, var(--hairline-strong));
+}
+
+.pwmeter__bar--3::after {
+  width: 100%;
+  background: var(--viz-rain);
+}
+
+.pwmeter__label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+/* --- requirement checklist ---------------------------------------------- */
+.pwreqs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pwreqs__item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.pwreqs__item--ok {
+  color: var(--viz-rain);
+}
+
+.pwreqs__mark {
+  flex: none;
+  width: 12px;
+  font-size: 11px;
+  /* Tabular alignment: the tick and the ring have different widths, and without a fixed
+     box the label text shifts sideways the moment a requirement is met. */
+  text-align: center;
+}
+
+/* --------------------------------------------------- phone entry -- */
+/*
+   Country dial code beside the local number.
+
+   `grid` with an `auto` first column rather than flex: the select must size to its widest
+   *selected* value (a flag, two-letter code and a dial code — "🇬🇶 GQ +240"), and the
+   number field takes the rest. With flex, `flex-basis` would have to be a guessed pixel
+   width, and it would clip on the longer codes.
+
+   `min-width: 0` on the number input is load-bearing. Grid items default to
+   `min-width: auto`, which for an input means its intrinsic `size` — so without this the
+   pair overflows the form on a 360px screen instead of the input shrinking.
+*/
+.phonefield {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+}
+
+.phonefield__code {
+  /* Native select arrow needs room; padding-right is asymmetric on purpose. */
+  padding-right: 8px;
+  /* Tabular figures keep the dial codes from shifting width between options. */
+  font-variant-numeric: tabular-nums;
+}
+
+.phonefield__number {
+  min-width: 0;
+}
+
+/*
+   Visually hidden but available to screen readers. Used for the country select's label —
+   `display: none` or `visibility: hidden` would remove it from the accessibility tree
+   too, leaving the control announced as a bare "combo box" with no indication of what it
+   selects. The 1px clip rect is the technique that survives every screen reader.
+*/
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.authform__submit {
+  width: 100%;
+  margin-top: 6px;
+  justify-content: center;
+}
+
+.authform__submit:disabled {
+  opacity: 0.62;
+  cursor: progress;
+}
+
+.authform__message {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  border: 1px solid;
+}
+
+.authform__message[data-tone="error"] {
+  border-color: color-mix(in srgb, #b42318 34%, transparent);
+  background: color-mix(in srgb, #b42318 7%, transparent);
+  color: #8f1d13;
+}
+
+.authform__message[data-tone="ok"] {
+  border-color: color-mix(in srgb, var(--viz-rain, #0f8f63) 34%, transparent);
+  background: color-mix(in srgb, var(--viz-rain, #0f8f63) 7%, transparent);
+  color: #0b6a4a;
+}
+
+[data-theme="dark"] .authform__message[data-tone="error"] {
+  color: #ff9a8f;
+}
+
+/* ----------------------------------------------- idle timeout -- */
+/*
+   The inactivity warning. Deliberately a real modal — a toast is dismissible by accident
+   and easy to miss, and this one has a consequence (being signed out) that the user needs
+   the chance to prevent.
+
+   High z-index because it must sit above the ServiceStatus banner and any chart tooltip.
+*/
+.idlemodal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  /* Dimmed rather than opaque: seeing the dashboard behind it reassures the user that
+     nothing has been lost, which matters when the dialog is about losing access. */
+  background: color-mix(in srgb, var(--ink, #0b001b) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.idlemodal__card {
+  width: 100%;
+  max-width: 420px;
+  padding: 26px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px -12px color-mix(in srgb, var(--ink, #0b001b) 45%, transparent);
+}
+
+.idlemodal__title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.idlemodal__body {
+  margin: 0 0 16px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* Tabular figures so the countdown does not jiggle as digits change width — a shifting
+   number reads as a glitch in a dialog that is already slightly alarming. */
+.idlemodal__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.idlemodal__track {
+  height: 4px;
+  margin-bottom: 16px;
+  border-radius: 999px;
+  background: var(--hairline-strong);
+  overflow: hidden;
+}
+
+.idlemodal__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  /* Linear, matching the 1s tick — an eased transition would make the bar appear to
+     hesitate and then rush, which misreports the time left. */
+  transition: width 1s linear;
+}
+
+/* The reassurance line. Distinct from the body text because it answers the question the
+   user actually has: does being signed out mean I stop being warned? (It does not.) */
+.idlemodal__note {
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--surface-raised);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.idlemodal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.idlemodal__stay {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+/* ------------------------------------------ pending verification -- */
+/*
+   The waiting room between signup and the dashboard. Reached in a mildly anxious moment
+   ("did my signup work?"), so the layout leads with reassurance — mark, then heading,
+   then the address we actually stored — before it asks for anything.
+*/
+.pendingmark {
+  margin-bottom: 18px;
+  color: var(--accent);
+}
+
+/* The address, shown back. This is the element that catches a typo, which is the single
+   most likely reason someone is stuck on this page — so it is boxed rather than run into
+   a paragraph where it would be skimmed past. */
+.pendingbox {
+  display: flex;
+  flex-direction: column;
+  /* 7px, up from 4. At 4px an uppercase eyebrow and a 15px address read as one crowded
+     block, and the address is the element the user has to actually check for a typo — it
+     needs to separate from its label, not sit against it. */
+  gap: 7px;
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 11px;
+  background: var(--surface-raised);
+}
+
+.pendingbox__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  /* The trailing space in the markup would otherwise collapse. It exists so the copied
+     text and the screen-reader announcement read "…link to lionel@…" rather than
+     "…link tolionel@…" — the two nodes are inline, so nothing else separates them. */
+  white-space: pre-wrap;
+}
+
+.pendingbox__email {
+  font-size: 16px;
+  font-weight: 650;
+  /* Slightly tighter than body line-height: a wrapped address should read as one unit
+     rather than as two lines of prose. */
+  line-height: 1.35;
+  color: var(--text-primary);
+  /* Long addresses must wrap rather than widen the panel — at 360px an unbroken address
+     would otherwise push a horizontal scrollbar onto the whole page.
+     `break-word` and not `break-all`: breaking mid-token is how a reader misreads their
+     own address and concludes it is wrong, so breaks land between word parts. */
+  word-break: break-word;
+}
+
+.authpanel__note {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/*
+   Continue first, resend second. Most people arriving here already have the email, so the
+   common path gets the primary weight — a prominent "Resend" invites a duplicate send
+   before the first one has landed.
+*/
+.pendingactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.pendingactions__go {
+  flex: 1 1 auto;
+  justify-content: center;
+  text-align: center;
+}
+
+.pendinghelp {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* A form submit that must read as a link: sign-out has to be a POST (a GET link would let
+   any image tag on any page sign the user out), but it is a minor escape hatch and styling
+   it as a button would give it more weight than "continue". */
+.linkbutton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.linkbutton:hover,
+.linkbutton:focus-visible {
+  color: var(--accent);
+}
+
+[data-theme="dark"] .authform__message[data-tone="ok"] {
+  color: #5fd9ab;
+}
+
+/* ===================================================================== portal == */
+/*
+   The subscriber's own portal: sidebar + content, one gate in the layout.
+
+   Distinct from /dashboard, which is the global operations view. Same visual system, but
+   the information architecture is per-account rather than service-wide.
+*/
+
+.portal {
+  padding: 34px 0 72px;
+}
+
+.portal__grid {
+  display: grid;
+  gap: 28px;
+  padding: 0 24px;
+}
+
+/* Sidebar becomes a column at 900px. Below that it is a horizontal scroller above the
+   content — see PortalNav for why that beats a hamburger here. */
+@media (min-width: 900px) {
+  .portal__grid {
+    grid-template-columns: 214px minmax(0, 1fr);
+    gap: 36px;
+  }
+}
+
+.portal__main {
+  /* min-width:0 stops a wide table or long mono string from blowing out the grid track
+     instead of scrolling inside it. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.portal__title {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.portal__lede {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.portal__tiles {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------- portal sidebar -- */
+/*
+   NOT sticky — `.portal__side` is.
+
+   Both were sticky at `top: 84px`, which is what made the identity panel scroll up and
+   overlap the nav: a sticky child inside a sticky parent pins to the viewport
+   independently, so the nav froze while the panel below it kept moving inside the parent's
+   box. Only the wrapper sticks now, and the two children travel with it as one unit.
+*/
+.pnav {
+  align-self: start;
+}
+
+.pnav__list {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 6px;
+  list-style: none;
+  /* Horizontal scroller below 900px. `-webkit-overflow-scrolling` keeps momentum on iOS,
+     where a non-momentum scroller feels broken. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.pnav__list::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .pnav__list {
+    flex-direction: column;
+    gap: 2px;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+}
+
+.pnav__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: none;
+  /* Stops labels wrapping mid-word in the horizontal scroller. */
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.pnav__item:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.pnav__item--active {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.pnav__icon {
+  flex: none;
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------ portal cards -- */
+.pcard {
+  padding: 20px 22px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+/* Used for "you have not finished setting up" — accent-bordered so it reads as the next
+   action rather than as one card among several. */
+.pcard--prompt {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+
+.pcard__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.pcard__title {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 650;
+}
+
+.pcard__sub {
+  margin: 0 0 14px;
+  max-width: 68ch;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.pcard__headline {
+  margin: 4px 0 8px;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.pcard__body {
+  margin: 0 0 14px;
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.pcard__minihead {
+  margin: 16px 0 7px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.pcard__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pcard__foot {
+  margin: 16px 0 0;
+  font-size: 13px;
+}
+
+/* Failures must be visible without relying on colour alone — this pairs with wording that
+   names the problem ("3 failed — check your channels"). */
+.pcard__warn {
+  color: var(--sev-warning);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ chips -- */
+.chip {
+  padding: 3px 9px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+a.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip--on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.chip--bad {
+  border-color: color-mix(in srgb, var(--sev-emergency) 40%, transparent);
+  color: var(--sev-emergency);
+}
+
+.chip--quiet {
+  opacity: 0.72;
+}
+
+.chip--clear {
+  border-style: dashed;
+}
+
+/* ------------------------------------------------------- definition lists -- */
+.deflist {
+  display: grid;
+  gap: 11px;
+  margin: 0;
+}
+
+.deflist > div {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+/* Two columns once there is room. Below that, label above value — a 130px label column at
+   360px leaves too little for an email address. */
+@media (min-width: 560px) {
+  .deflist > div {
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 12px;
+    align-items: baseline;
+  }
+}
+
+.deflist dt {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.deflist dd {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------------- statuses -- */
+.statuspill {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.statuspill--on {
+  border-color: color-mix(in srgb, var(--viz-rain) 40%, transparent);
+  background: color-mix(in srgb, var(--viz-rain) 9%, transparent);
+  color: var(--viz-rain);
+}
+
+/* ------------------------------------------------------------ audit log -- */
+.auditlist {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auditrow {
+  padding: 12px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.auditrow:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.auditrow__main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auditrow__action {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auditrow__outcome {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.auditrow__outcome--failure,
+.auditrow__outcome--denied {
+  background: color-mix(in srgb, var(--sev-emergency) 12%, transparent);
+  color: var(--sev-emergency);
+}
+
+/* "by an organisation serving you" — the most consequential text in a row, so it is
+   accented rather than muted. */
+.auditrow__actor {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.auditrow__detail {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.auditrow__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------- lists: orgs, areas, keys -- */
+.orglist,
+.arealist,
+.keylist {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orglist__row,
+.arealist__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 11px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 13.5px;
+}
+
+.orglist__row:first-child,
+.arealist__row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.orglist__row > div,
+.arealist__row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.orglist__id,
+.arealist__bbox,
+.keylist__prefix {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.keylist__row {
+  padding: 14px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.keylist__row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.keylist__main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 9px;
+  font-size: 14px;
+}
+
+/* -------------------------------------------------------------- quick links -- */
+.portal__quick {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 700px) {
+  .portal__quick {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.quicklink {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  text-decoration: none;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.quicklink:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.quicklink strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.quicklink span {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.alertfeed {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.prefform {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---------------------------------------------------------- account menu -- */
+.acctmenu {
+  position: relative;
+}
+
+.acctmenu__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px 5px 5px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.acctmenu__trigger:hover {
+  border-color: var(--accent);
+}
+
+.acctmenu__avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.acctmenu__name {
+  max-width: 148px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Name hidden on narrow screens — at 360px it would push the theme toggle off the row.
+   The avatar and the open panel still identify the account. */
+@media (max-width: 640px) {
+  .acctmenu__name,
+  .acctmenu__chev {
+    display: none;
+  }
+}
+
+.acctmenu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 120;
+  width: 244px;
+  padding: 6px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: 0 18px 44px -14px color-mix(in srgb, var(--ink, #0b001b) 40%, transparent);
+}
+
+.acctmenu__head {
+  padding: 9px 10px 11px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.acctmenu__headname {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acctmenu__headmail {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.acctmenu__headid {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.acctmenu__badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.acctmenu__group {
+  display: flex;
+  flex-direction: column;
+  padding: 5px 0;
+  margin: 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.acctmenu__group:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+.acctmenu__item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.acctmenu__item:hover,
+.acctmenu__item:focus-visible {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.acctmenu__item--danger:hover,
+.acctmenu__item--danger:focus-visible {
+  background: color-mix(in srgb, var(--sev-emergency) 9%, transparent);
+  color: var(--sev-emergency);
+}
+
+/* ------------------------------------------------ portal session panel -- */
+/*
+   Identity, location and device, under the sidebar nav.
+
+   Sits below the nav rather than above it because navigation is what a returning user came
+   for; the identity block is a confirmation they glance at, not a destination.
+*/
+.portal__side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-self: start;
+}
+
+@media (min-width: 900px) {
+  .portal__side {
+    position: sticky;
+    /* 84px clears the 64px topbar plus breathing room. */
+    top: 84px;
+    /* A sticky element taller than the viewport pins its top and clips the rest — on a
+       laptop at 700px with seven nav items plus the identity panel, "API keys" became
+       unreachable. Bounding the height and scrolling inside keeps every item reachable.
+
+       `overflow-y: auto` rather than `scroll` so the scrollbar only appears when it is
+       actually needed, which is most of the time it is not. */
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+    /* Stops a scroll gesture that reaches the sidebar's end from continuing into the page
+       behind it — the effect that makes a nested scroller feel broken. */
+    overscroll-behavior: contain;
+    /* Room for the scrollbar so text does not sit under it on Windows, where the
+       scrollbar takes layout space rather than overlaying. */
+    scrollbar-width: thin;
+  }
+}
+
+/* Hidden below 900px. The sidebar becomes a horizontal scroller there, and the identity
+   block would push the actual content below the fold on a 360px screen — the account menu
+   in the topbar already carries the same name and avatar. */
+.sesspanel {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .sesspanel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 13px 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    background: var(--surface-raised);
+  }
+}
+
+.sesspanel__id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sesspanel__avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  /* Emoji render slightly small in a flex centre; 17px on a 34px circle reads as balanced
+     against the 26px topbar variant. */
+  font-size: 17px;
+  line-height: 1;
+  /* Colour comes from the account's derived palette, set inline. */
+  background: var(--accent);
+}
+
+.sesspanel__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sesspanel__name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sesspanel__mail {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sesspanel__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 11px;
+  border-top: 1px solid var(--hairline);
+}
+
+.sesspanel__row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sesspanel__icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.sesspanel__value {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* The caveat. Deliberately not muted into invisibility — "approximate" is the part that
+   stops an inexact city reading as a fact. */
+.sesspanel__hint {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.sesspanel__link {
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------- secret field -- */
+/*
+   Password input with a padlock on the left and a show/hide eye on the right.
+
+   Both affordances are inside the input's box rather than beside it, so the field still
+   reads as one control — icons floated outside would make the row look like three separate
+   things on a narrow screen.
+*/
+.secretfield {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.secretfield__input {
+  /* Padding for both icons. Asymmetric because the eye is a tap target and needs more
+     room than the static padlock. */
+  padding-left: 38px;
+  padding-right: 44px;
+}
+
+.secretfield__lock {
+  position: absolute;
+  left: 13px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Padlock picks up the accent on focus, so the field reads as active as a whole rather
+   than only its border changing. */
+.secretfield__input:focus ~ .secretfield__lock,
+.secretfield:focus-within .secretfield__lock {
+  color: var(--accent);
+}
+
+.secretfield__eye {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  /* 34px: below the 44px ideal tap target, but the input's own 46px height gives the
+     vertical room, and a wider button would crowd a long password. */
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.secretfield__eye:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+/* Visible when reached by Shift-Tab — the button is tabIndex=-1 so the normal tab order
+   goes password -> submit, but a keyboard user who backs into it must still see focus. */
+.secretfield__eye:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--accent);
+}
+
+/* Pressed state carries meaning here (the password is currently visible), so it is shown
+   rather than left to the icon alone. */
+.secretfield__eye[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+/* Breach warning. Stacked so the headline reads as the instruction and the explanation
+   sits beneath it — a single run-on paragraph buries the action. */
+.pwbreach {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.pwbreach strong {
+  font-size: 13.5px;
+}
+
+.pwbreach span {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* ================================================================ area picker == */
+/*
+   Choosing the ground to monitor, without knowing what a bounding box is.
+
+   Mobile-first throughout: this is used outdoors, one-handed, on a mid-range Android, by
+   someone standing in the field they are registering.
+*/
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+/* Three visible tabs, not a dropdown. Every option must be one tap — "I could not find the
+   button" is the commonest reason a form is abandoned, and a hidden menu also needs JS to
+   open. Scrolls horizontally at 360px rather than wrapping to two rows, which would push the
+   map below the fold. */
+.picker__modes {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.picker__modes::-webkit-scrollbar {
+  display: none;
+}
+
+.picker__mode {
+  flex: none;
+  padding: 9px 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.picker__mode:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.picker__mode[aria-selected="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.picker__search {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.picker__results {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.picker__result {
+  display: block;
+  width: 100%;
+  /* 12px vertical gives a ~44px row — the minimum comfortable touch target, and these are
+     tapped outdoors with a thumb. */
+  padding: 12px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker__results li:last-child .picker__result {
+  border-bottom: 0;
+}
+
+.picker__result:hover,
+.picker__result:focus-visible {
+  background: var(--surface-raised);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+   The "no results" fallback.
+
+   Shown only after a search has completed and found nothing — not while typing, and not
+   before. It used to render nothing at all, which left a subscriber whose village is not on
+   the map with no visible next step; browser geolocation then filled the gap and a farm in
+   Ogun State was registered in England.
+
+   Styled as a calm panel rather than an error: for rural Nigeria a name search finding
+   nothing is the normal case, and red-flagging it would read as the subscriber's mistake.
+   --------------------------------------------------------------------------- */
+.picker__fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.picker__fallback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.picker__browse {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* Native <select> on purpose. A custom dropdown would need its own keyboard handling,
+   scroll-into-view and screen-reader semantics — all of which the platform control already
+   has, and which matter more here than visual consistency: this list is 37 states or up to
+   57 LGAs, browsed on a phone, outdoors. */
+.picker__browse select {
+  /* Room for the native chevron so a long LGA name is not overlapped by it. */
+  padding-right: 32px;
+}
+
+.picker__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* The confirmation block. Accent-bordered because it is the answer to "did it understand
+   me?" — the one thing on this screen the user must actually read. */
+.picker__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.picker__confirm strong {
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.picker__place {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   The confirmation card.
+
+   A farm described as being in Kobape, Ogun State was activated at Warrington, England,
+   because the panel showed a size and a place label but never the country or the LGA — so
+   nothing on screen contradicted it.
+
+   The facts are a <dl> rather than prose: a definition list is the honest markup for
+   label/value pairs, it reads correctly to a screen reader, and it stops the country from
+   being buried mid-sentence where an eye skims past it.
+   --------------------------------------------------------------------------- */
+.picker__confirm-title {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.picker__facts {
+  display: grid;
+  /* Labels sized to content so the values align in a column — the point is that "Country"
+     and its value sit where the eye already expects them, every time. */
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.picker__facts dt {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.picker__facts dd {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.picker__facts-aside {
+  color: var(--text-muted);
+}
+
+/* The explicit tick. Deliberately prominent: it gates submission, so a control that looked
+   optional would be a trap. */
+.picker__attest {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.picker__attest input {
+  /* 18px and a matching top offset so the box aligns with the first line of text rather
+     than floating above it. Tapped with a thumb, so not smaller. */
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+/* --------------------------------------------------------------- map canvas -- */
+.mapcanvas {
+  position: relative;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  /* Fixed height rather than an aspect ratio. A tall viewport should not give a tall map:
+     the size input and the confirmation must stay visible without scrolling, because the
+     whole design rests on comparing the shape against the number. */
+  height: 300px;
+}
+
+@media (min-width: 700px) {
+  .mapcanvas {
+    height: 380px;
+  }
+}
+
+.mapcanvas__holder {
+  width: 100%;
+  height: 100%;
+}
+
+/* Covers the map while it loads or locates. Two separate messages in the component, because
+   "loading the map" and "finding your location" take different times and mean different
+   things — one spinner for both leaves the user unsure what is happening. */
+.mapcanvas__veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.mapcanvas--failed {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  height: auto;
+  background: var(--surface-raised);
+}
+
+.mapcanvas--failed p {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+/* Floating instruction while drawing. Over the map rather than above it, so the map keeps
+   its full height on a phone. */
+.mapcanvas__hint {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink, #0b001b) 78%, transparent);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------ empty states -- */
+/*
+   The screen someone sees before they have configured anything.
+
+   Centred and generous rather than a terse "no results" row: an empty settings section is a
+   teaching moment, and the two things it must carry are what the feature would do for them
+   and the next step. A bare "No webhook endpoints found" answers neither.
+*/
+.emptystate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 24px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  text-align: center;
+}
+
+.emptystate__art {
+  color: var(--accent);
+  opacity: 0.5;
+}
+
+.emptystate__title {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.emptystate__body {
+  margin: 0;
+  /* 58ch: long enough for a real explanation, short enough to stay readable centred —
+     centred text past ~65 characters becomes hard to track back to the next line. */
+  max-width: 58ch;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.emptystate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------- role list -- */
+/*
+   Roles with their consequences, on the team screen.
+
+   Each row shows the permissions and API scopes the role grants, because "Operations" tells
+   an administrator nothing on its own — the consequence of the choice is what they are
+   actually deciding.
+*/
+.rolelist {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rolelist__row {
+  padding: 14px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.rolelist__row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.rolelist__head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 14.5px;
+}
+
+.rolelist__desc {
+  margin: 4px 0 0;
+  max-width: 70ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.rolelist__scopes {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------- workspace + team forms -- */
+/*
+   Workspace CRUD and the per-workspace role grid.
+
+   The role grid is `auto-fit` rather than a fixed column count: an aggregator may run two
+   projects or nine, and a table with a column per workspace would scroll horizontally on the
+   phone most of this product's users actually hold. Cards that reflow keep every selector
+   reachable with a thumb.
+*/
+
+.wsform {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wsform__row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.wsform__legend {
+  padding: 0;
+  margin: 6px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.wsform__tracks {
+  padding: 0;
+  margin: 6px 0 0;
+  border: 0;
+}
+
+.wsform__track {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+  padding: 11px 0;
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.wsform__track:first-of-type {
+  border-top: 0;
+}
+
+.wsform__track input {
+  margin-top: 3px;
+  accent-color: var(--brand-600);
+}
+
+.wsform__trackLabel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.wsform__trackSummary,
+.wsform__hazards {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.wsform__hazards {
+  font-size: 11.5px;
+}
+
+/*
+   An undeliverable track is marked, never hidden and never styled as an error. It is a real
+   choice with an honest caveat — the aggregator's interest is the demand signal that sequences
+   the work — so this reads as "pending", not "broken".
+*/
+.wsform__pending {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #8a5a00;
+  background: color-mix(in srgb, #b78103 12%, transparent);
+  border: 1px solid color-mix(in srgb, #b78103 30%, transparent);
+}
+
+.wsform__badge {
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline-strong);
+}
+
+.wsform__id {
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--surface-sunken);
+}
+
+.wsform__danger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.wsform__dangerHint {
+  flex: 1 1 240px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.teamgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin: 8px 0 2px;
+}
+
+.teamgrid__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.teamrow {
+  padding: 16px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.teamrow:first-of-type {
+  border-top: 0;
+}
+
+.teamrow__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.teamrow__email {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.authpanel__list {
+  margin: 4px 0 14px;
+  padding-left: 20px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* Resend control on a pending invitation. Sits under the row rather than beside the email,
+   so the hint explaining what a resend does to the earlier link has room to be read. */
+.teaminvite__resend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  margin-top: 9px;
+}
+
+.btn--small {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------- raster fallback map -- */
+/*
+   The no-WebGL map: OpenStreetMap raster tiles as plain <img> elements.
+
+   Rendered for browsers without WebGL 2, which MapLibre 6 requires — a default Firefox profile
+   can report webgl=true / webgl2=false, as can older Android webviews. Those users get a map
+   they can see and tap rather than a text field, which is the difference between checking that
+   the square covers your land and taking it on trust.
+
+   No transforms, no filters, no custom properties in positions — everything here is
+   position/left/top, which renders identically on every engine this targets including older
+   Android WebView and iOS Safari.
+*/
+
+.rastermap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: crosshair;
+  /* Panning is not implemented, so the browser should keep its normal scroll behaviour —
+     `touch-action: none` here would make the map a scroll trap on a phone. */
+  touch-action: pan-y;
+  background: var(--surface-sunken);
+}
+
+.rastermap:focus-visible {
+  outline: 2px solid var(--brand-600);
+  outline-offset: -2px;
+}
+
+/* The resolved area. Same purple as the vector path's fill, so the two maps read as one
+   product rather than two. */
+.rastermap__area {
+  position: absolute;
+  border: 2px solid #6a0dad;
+  background: rgb(106 13 173 / 18%);
+  pointer-events: none;
+}
+
+/* Centre pin. A CSS dot rather than an image: one less request on a connection that is already
+   the reason this fallback exists. */
+.rastermap__pin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2.5px solid #6a0dad;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 55%);
+  pointer-events: none;
+}
+
+.rastermap__controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+
+/* 34px, which clears the 24px minimum for a touch target with room for a thumb — these are the
+   only controls on this path. */
+.rastermap__controls .btn {
+  min-width: 34px;
+  padding: 6px 0;
+  background: var(--surface-raised);
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ODbL attribution. Inside the frame and not removable — it is a licence condition, not a
+   credit we choose to give. */
+.rastermap__credit {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 2px 7px;
+  border-top-left-radius: 6px;
+  background: rgb(255 255 255 / 82%);
+  color: #333;
+  font-size: 10.5px;
+}
+
+.rastermap__credit a {
+  color: #333;
+}
+
+/* ------------------------------------------------------- area manager -- */
+/*
+   One block per monitored plot: rename form, then the stop-monitoring control.
+
+   Stacked rather than tabulated because a plot has a name, a crop, a centre point and an action —
+   four things that do not fit a phone-width table without horizontal scrolling, which is the
+   device most of these subscribers use.
+*/
+
+.arearow {
+  padding: 18px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.arearow:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.arearow__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+/* ------------------------------------------------------- plot identity -- */
+/*
+   A plot's name and crop: TEXT by default, form only on request.
+
+   This section used to render two filled input boxes and a permanent "Save name", which read as a
+   form abandoned half-finished — the page looked permanently in edit mode, so the state that
+   actually matters ("this plot is called X and it is being watched") was never displayed. Reading
+   is the common act here and renaming the rare one, so the default now serves the common one.
+*/
+
+.plot {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+/* Editing is a visibly different mode, not the same card with the text swapped for boxes. The
+   brand-tinted edge is what tells a returning eye which row is open. */
+.plot--editing {
+  border-color: color-mix(in srgb, var(--brand-600) 35%, var(--hairline));
+  background: var(--surface-sunken);
+}
+
+.plot__ident {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.plot__name {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.plot__crop {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.plot__facts {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.plot__editing {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+}
+
+/* --------------------------------------------------- liquid glass pill -- */
+/*
+   Active / inactive state, as a translucent lit surface.
+
+   `backdrop-filter` is what makes it read as glass rather than as a coloured chip — it samples the
+   card beneath, so the pill picks up the surface it sits on in both themes without a second set of
+   tokens. Where the property is unsupported the `background` alone still renders a legible pill,
+   which is why the colour is set outright rather than left to the filter.
+
+   **Text and a dot, never colour alone.** The severity palette rule applies here too: a glow that
+   means "live" is invisible to a colourblind reader and gone in a screenshot, so the word carries
+   the meaning and the glass carries the feeling.
+*/
+
+.glasspill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--viz-rain, #0f8f63) 30%, transparent);
+  background: color-mix(in srgb, var(--viz-rain, #0f8f63) 12%, transparent);
+  backdrop-filter: blur(6px) saturate(160%);
+  -webkit-backdrop-filter: blur(6px) saturate(160%);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--viz-rain, #0f8f63);
+  white-space: nowrap;
+}
+
+.glasspill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  /* The lit look: a soft halo in the pill's own colour, so light and dark both work. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.glasspill--on .glasspill__dot {
+  animation: glasspulse 2.6s ease-in-out infinite;
+}
+
+/* Inactive is FLAT and unlit — no blur, no pulse, muted ink. The absence of the glass effect is
+   itself the signal, which is why this is not simply a grey version of the same pill. */
+.glasspill--off {
+  border-color: var(--hairline-strong);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--text-muted);
+}
+
+.glasspill--off .glasspill__dot {
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+@keyframes glasspulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 4%, transparent);
+  }
+}
+
+/* A pulsing dot is decoration; for a reader who asked for less motion it is a distraction on a page
+   about a flood. The pill stays lit — only the movement stops. */
+@media (prefers-reduced-motion: reduce) {
+  .glasspill--on .glasspill__dot {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------- monitoring panel -- */
+/*
+   What monitoring is currently saying about one plot: category, meaning, what to do, confidence,
+   and the evidence behind it.
+
+   Colour comes from the existing `--sev-*` tokens, which were validated for colourblind
+   separation — NOT from new hues picked here, and never from brand purple, which would make a
+   status read as decoration. Every panel also carries a text label, so colour is an accent and
+   never the signal itself.
+
+   A left border rather than a filled background: a filled emergency panel dominates a page that
+   may hold four plots, and the relative severity between them is the thing a subscriber is
+   scanning for.
+*/
+
+.monpanel {
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  border-left: 3px solid var(--sev-info);
+  border-radius: 0 10px 10px 0;
+  background: var(--surface-sunken);
+}
+
+.monpanel[data-tone="advisory"] { border-left-color: var(--sev-advisory); }
+.monpanel[data-tone="watch"]     { border-left-color: var(--sev-watch); }
+.monpanel[data-tone="warning"]   { border-left-color: var(--sev-warning); }
+.monpanel[data-tone="emergency"] { border-left-color: var(--sev-emergency); }
+
+/* Pending is deliberately NOT a severity. A plot awaiting its first scan is working correctly,
+   and borrowing a status colour would make a healthy state read as a finding. */
+.monpanel--pending {
+  border-left-style: dashed;
+  border-left-color: var(--hairline-strong);
+}
+
+.monpanel__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.monpanel__pill {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--sev-info);
+}
+
+.monpanel__pill[data-tone="advisory"] { background: var(--sev-advisory); }
+.monpanel__pill[data-tone="watch"]     { background: var(--sev-watch); }
+.monpanel__pill[data-tone="warning"]   { background: var(--sev-warning); }
+.monpanel__pill[data-tone="emergency"] { background: var(--sev-emergency); }
+
+.monpanel--pending .monpanel__pill {
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px dashed var(--hairline-strong);
+}
+
+.monpanel__hazard {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Which intelligence track this finding belongs to. Shown on every panel because SHELTER spans
+   three, and "is this about my crop or about flooding?" is the first thing to establish. */
+.monpanel__track {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.monpanel__phase {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #8a5a00;
+  background: color-mix(in srgb, #b78103 12%, transparent);
+  border: 1px solid color-mix(in srgb, #b78103 28%, transparent);
+}
+
+.monpanel__meaning {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+/* Three facts, side by side on a desktop and stacked on a phone. `auto-fit` rather than a fixed
+   three columns: at 360px they must stack, and a horizontal scroll on the one screen a farmer
+   reads in a field is not acceptable. */
+.monpanel__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--hairline);
+}
+
+.monpanel__facts span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.monpanel__facts strong {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Collapsed by default. The evidence is the product's own argument and must be reachable, but
+   expanded by default it buries the decision under the workings. */
+.monpanel__evidence {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.monpanel__evidence summary {
+  cursor: pointer;
+  color: var(--brand-600);
+  font-weight: 600;
+}
+
+.monpanel__evidence ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.monpanel__sources,
+.monpanel__cascade {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.monpanel__cascade {
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* On-demand reassessment. Sits at the foot of the panel, below the evidence — the reading is
+   what someone came for, so the control that refreshes it comes after the answer.
+
+   Column on a phone: the hint is a full sentence and would compress the button to a few
+   characters beside it. */
+.monpanel__refresh {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+@media (min-width: 620px) {
+  .monpanel__refresh {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+}
+
+/* States what the button will actually do — query live catalogues, take up to a minute, and
+   send nothing. All three are things a subscriber would otherwise have to press it to find out,
+   and the third is the one that makes it safe to press at all. */
+.monpanel__refreshHint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* The button must not shrink below its label when the hint sits beside it: "Reading satellite
+   data…" is longer than "Check now", so a flex-shrunk button would reflow mid-request. */
+.monpanel__refresh .btn {
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------- activation summary -- */
+/*
+   The confirmation after a plot goes live. Deliberately more than a toast: the commonest real
+   failure is a correct-looking success over the WRONG piece of ground, and the centre point is
+   the one field that catches it — but only while the subscriber is still on the screen.
+
+   Green accent, not brand purple: this is a status, and the brand palette is for identity. It
+   pairs the colour with a tick and the word "active", so it survives a colourblind reader.
+*/
+
+.actsummary {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--viz-rain, #0f8f63) 34%, transparent);
+  border-left-width: 3px;
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, var(--viz-rain, #0f8f63) 6%, transparent);
+}
+
+.actsummary__head {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14.5px;
+}
+
+.actsummary__tick {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--viz-rain, #0f8f63);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.actsummary__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.actsummary__grid dt {
+  margin-bottom: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.actsummary__grid dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.actsummary__next,
+.actsummary__check {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.actsummary__check {
+  margin-top: 8px;
+  color: var(--text-muted);
+}
+
+/* The way forward from a successful add.
+
+   The form closes on success (it used to stay open with the previous entry still in it, which
+   read as though nothing had happened), so the summary carries the next action rather than
+   leaving a dead end. Separated by a rule because it is an action, not more prose. */
+.actsummary__actions {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* ------------------------------------------- intelligence legend -- */
+/*
+   The category ladder and the three tracks. On the page rather than only in onboarding, because
+   choosing a delivery threshold is a decision the product asks the subscriber to make and they
+   cannot make it without seeing what the words mean.
+*/
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legend__row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.legend__row:first-child {
+  border-top: 0;
+}
+
+/* At 360px a 92px badge column leaves too little for the text, so it stacks. */
+@media (max-width: 520px) {
+  .legend__row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+.legend__row .monpanel__pill {
+  align-self: start;
+  justify-self: start;
+}
+
+.legend__meaning {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.legend__response {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.legend__tracks {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline-strong);
+}
+
+.legend__tracksTitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.legend__trackList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legend__trackName {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.legend__trackScope {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------- alert explanations -- */
+/*
+   The three explanation surfaces on an alert card, between the actions and the raw evidence.
+
+   A definition list rather than paragraphs: each row answers one question ("your crop", "why",
+   "watering"), and the label carries that meaning at a glance for someone scanning a queue of
+   alerts rather than reading one.
+*/
+
+.explains {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 4px;
+}
+
+.explains dt {
+  margin-bottom: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.explains dd {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------- track capabilities -- */
+/*
+   The folded remainder of a track's capability list on the dashboard.
+
+   Replaces a dead "+2 more" label that named a count and offered no way to see it. `<details>`
+   needs no JavaScript, is keyboard reachable and announced correctly for free, and adds nothing to
+   the bundle — which matters on the connections this product targets.
+*/
+
+.track__more {
+  margin-top: 2px;
+}
+
+.track__more summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand-600);
+  /* The default triangle is tiny and easy to miss on a phone; the list marker is replaced with
+     one sized for a thumb rather than a mouse. */
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.track__more summary::-webkit-details-marker {
+  display: none;
+}
+
+.track__more summary::before {
+  content: "+";
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.track__more[open] summary::before {
+  content: "−";
+}
+
+.track__more[open] summary {
+  margin-bottom: 4px;
+}
+
+/* ------------------------------------------------- Fahis verdict -- */
+/*
+   "Were we right?", beside the alert it judges.
+
+   ## The tone mapping is the important part
+
+   `unverified` is NEUTRAL, never a warning colour. A flood in a remote LGA may never be reported by
+   anything indexable, so "no independent reporting found" is the common rural case rather than
+   evidence the warning was wrong. Colouring it as a miss would tell a subscriber their correct
+   warning failed, and destroy the trust the accountability agent exists to build.
+
+   Only `refuted` — a credible source saying the hazard did not happen — reads as a miss, and that
+   verdict is rare and guarded upstream.
+*/
+
+.verdict {
+  margin: 14px 0 4px;
+  padding: 11px 13px;
+  border-left: 3px solid var(--hairline-strong);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-sunken);
+}
+
+.verdict[data-tone="good"] {
+  border-left-color: var(--viz-rain, #0f8f63);
+}
+
+.verdict[data-tone="bad"] {
+  border-left-color: var(--sev-warning);
+}
+
+/* Neutral keeps the default hairline: present, not judged. */
+
+.verdict__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 5px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.verdict__when {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.verdict__note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.verdict__rationale {
+  margin: 7px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--hairline);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.verdict__sources {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* --- Cited sources -------------------------------------------------------------------------
+   The evidence behind a verdict, listed so it can be checked rather than believed.
+
+   Collapsed by default: a subscriber reading an alert during a flood wants the finding, and four
+   citations above the fold would bury it. Open is one tap away, and `<details>` gives that for
+   free with working keyboard and screen-reader semantics.
+*/
+
+.verdict__evidence {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.verdict__evidence > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--brand-600);
+  /* A comfortable tap target on a phone without a visible button. */
+  padding: 3px 0;
+}
+
+.verdict__evidence > summary:hover {
+  text-decoration: underline;
+}
+
+.vsources {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.vsource {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.vsource__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  /* A long headline wraps rather than overflowing — these come from news sites and are not
+     length-bounded. */
+  overflow-wrap: anywhere;
+}
+
+.vsource__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Tier is a TEXT label, never colour alone — an agency bulletin outweighing a blog has to survive
+   a colourblind reader and a monochrome print, same rule as the severity palette. The tint is
+   reinforcement only. */
+.vsource__tier {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline-strong);
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+}
+
+.vsource__tier[data-tier="official"] {
+  border-color: color-mix(in srgb, var(--viz-rain, #0f8f63) 45%, transparent);
+  color: var(--viz-rain, #0f8f63);
+}
+
+.vsource__tier[data-tier="low"] {
+  color: var(--text-muted);
+}
+
+.vsource__host {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.vsource__date::before {
+  content: "· ";
+}
+
+.verdict__foot {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* ================================================================= devices table == */
+/*
+   Trusted devices on the Security page.
+
+   ## Why a table and not cards
+
+   Five parallel facts per row, compared ACROSS rows — "which of these is not me?" is answered by
+   scanning one column, and cards destroy that alignment. This is the one place in the portal where
+   a table is the right shape rather than a legacy of one.
+
+   ## Mobile
+
+   The table keeps its columns and the wrapper scrolls horizontally. Collapsing to stacked blocks
+   would remove the column alignment that makes the scan possible, so the honest trade on a narrow
+   screen is a swipe rather than a reflow. `-webkit-overflow-scrolling` keeps that momentum-scrolled
+   on iOS, where a non-momentum scroll region feels broken.
+*/
+
+.devices {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.devices__title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.devices__notice {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.devices__scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* A hairline frame so a partially-scrolled table reads as cut off rather than as broken. */
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+.devices__table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.devices__table th {
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.devices__table td {
+  padding: 10px 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hairline);
+  line-height: 1.5;
+}
+
+.devices__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* The reader's own device, tinted so it is found without hunting. The row also says "This device"
+   in words — the tint alone would be invisible to a colourblind reader. */
+.devices__table tbody tr[data-current="true"] {
+  background: color-mix(in srgb, var(--brand-600) 4%, transparent);
+}
+
+.devices__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.devices__sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Email can be long and must not force the table wider than the swipe already requires. */
+.devices__email {
+  overflow-wrap: anywhere;
+  max-width: 190px;
+}
+
+/* ================================================================ password change == */
+
+.pwchange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pwchange--open {
+  display: block;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--brand-600) 30%, var(--hairline));
+  border-radius: 12px;
+  background: var(--surface-sunken);
+}
+
+.pwchange__hint,
+.pwchange__lede {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.pwchange__lede {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+}
+
+/* The code is read off one screen and typed into another, often on a phone. Monospaced and widely
+   spaced so a character cannot be misread — the same reasoning as the email that carries it. */
+.authform__input--code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 20px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  max-width: 14ch;
+}
+
+/* A button that reads as a link. Used for "send a new code", which must be a submit rather than an
+   anchor — nesting a second form inside this one would be invalid HTML. */
+.linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--brand-600);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Alert delivery editor — /portal/settings
+
+   Channels were settable only at signup, so a mistyped phone number was permanent. These are
+   the controls that fix that, plus the per-plot delivery mode that lets an aggregator be the
+   only voice reaching their farmer.
+   --------------------------------------------------------------------------- */
+.chanrows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Grid, not flex, so the fields line up column-wise down the rows — scanning "which
+   address" or "which plot" reads down one column instead of hunting across each row.
+
+   Five columns became six when the sensitivity dial was added, and it wraps to two rows of three
+   rather than squeezing six controls onto one line: the dial carries a line of help text under it,
+   which needs readable width to do its job. */
+.chanrow {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+/* Six controls do not fit on one line legibly, so above the phone breakpoint the row becomes a
+   3 × 2 grid. The dial spans two columns to hold its help text on one line. */
+@media (min-width: 721px) {
+  .chanrow {
+    grid-template-columns: 1fr 1.6fr 1fr 1fr auto;
+    grid-template-areas: none;
+  }
+
+  .chanrow__cell--dial {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Stacks on a phone. The grid above would compress the selects to unusable widths, and this
+   page is opened on a handset by someone whose alerts are not arriving. */
+@media (max-width: 720px) {
+  .chanrow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+.chanrow__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* The consequence of the selected dial, in words. A number alone ("from 0.45") does not tell a
+   subscriber what they are giving up, and this control's whole risk is someone silencing a real
+   warning without realising it. */
+.chanrow__help {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.chanrow__drop {
+  padding-bottom: 10px;
+  white-space: nowrap;
+}
+
+.chanrow__drop:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* --- per-plot delivery mode --- */
+.delivrow {
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  margin-bottom: 12px;
+}
+
+.delivrow__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.delivrow__modes {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+/* Radio plus a two-line label. The help text is inside the <label> so tapping anywhere in the
+   block selects the option — a 44px target rather than an 18px circle, which is what makes this
+   usable outdoors with a thumb. */
+.delivmode {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.delivmode input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.delivmode__help {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   "At a glance" rows on an assessment — the report card.
+
+   Apple answers "what's happening?" before "why?". These rows carry the questions that decide
+   whether to act TODAY — is it moving, is it unusual for this field, when was it last actually
+   seen, what about the water — while the evidence stays one tap away in the <details> below.
+
+   A <dl> because these are label/value pairs: it reads correctly to a screen reader and keeps the
+   values in a column the eye can scan, rather than burying them mid-sentence.
+   --------------------------------------------------------------------------- */
+.glance {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.glance dt {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.glance dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Direction as a colour AND a word. The word is always present ("Rising", "Easing"), so this is
+   reinforcement rather than the signal — a colourblind reader or a monochrome screenshot loses
+   nothing. Rising uses the risk hue, not the severity palette: it describes a trend, not a status,
+   and borrowing the status palette would imply a severity this row does not carry. */
+.glance dd[data-trend="up"] {
+  color: var(--viz-risk);
+}
+
+.glance dd[data-trend="down"] {
+  color: var(--viz-rain);
+}
+
+.glance__aside {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* An absent measurement is a fact about the reading, so it gets a line rather than being inferred
+   from a missing number. */
+.glance__caveat {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-raised);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------------------
+   Report-card track modules — one openable card per measured dimension.
+
+   The web half of what `email/layout.track_modules` renders as tables. Same content, same order,
+   from the same server-side list; only the disclosure differs, because email has no interaction
+   that survives every client and so renders the detail inline.
+
+   Every colour is an existing token. No new palette values: the `--viz-*` series were validated
+   for colourblind separation and severity colours are a reserved status palette shipped with an
+   icon and a label — a module header is neither, so it uses text tokens and hairlines like the
+   rest of the card furniture.
+   --------------------------------------------------------------------------- */
+
+.tracks {
+  margin: 18px 0 0;
+}
+
+.tracks__title {
+  margin: 0 0 9px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.track {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  margin: 0 0 8px;
+  background: var(--surface-raised);
+}
+
+.track[data-open="true"] {
+  border-color: var(--hairline-strong);
+}
+
+/* A grid rather than flex so the reading column right-aligns against the chevron without the
+   label's length pushing it around — plot names and readings vary a lot in width. */
+.track__head {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+/* Keyboard focus must be visible: this is the only control on the alert card, so losing the ring
+   would make the modules unreachable without a mouse. `:focus-visible` rather than `:focus` so a
+   pointer tap does not leave a ring behind. */
+.track__head:focus-visible {
+  outline: 2px solid var(--brand-600);
+  outline-offset: 2px;
+}
+
+.track__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.track__reading {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.track__chevron {
+  width: 16px;
+  font-size: 15px;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.track__body {
+  padding: 0 14px 13px;
+}
+
+.track__meaning {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.track__detail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.track__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.track__detail dt {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.track__detail dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.track__sources {
+  margin: 9px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* On a narrow phone the label and reading stack: at ~340px a long label plus "126 mm expected"
+   overflows a single row, and truncating either loses meaning. */
+@media (max-width: 380px) {
+  .track__head {
+    grid-template-columns: 1fr auto;
+  }
+
+  .track__label {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   API key minting, and the workspace monitoring table.
+
+   The key reveal is styled as a warning rather than a success: the aggregator has one chance to
+   copy it, so the block has to read as "act now" and not as "done". Amber, not green — and the
+   status palette rule still holds, because the warning text carries the meaning and the colour
+   only reinforces it.
+   --------------------------------------------------------------------------- */
+
+.keyreveal {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #dd7400;
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+}
+
+.keyreveal__warn {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+/* `word-break` so a long key wraps inside the box instead of forcing a horizontal scroll on a
+   phone — an aggregator copying by hand needs to see all of it at once. `user-select: all` makes
+   one tap select the whole secret. */
+.keyreveal__secret {
+  display: block;
+  padding: 11px 12px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: break-all;
+  user-select: all;
+  color: var(--text-primary);
+}
+
+.keyreveal__name {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.scopeset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.scopeopt {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.scopeopt__help {
+  display: block;
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* The workspace monitoring rows: which customer owns each plot, and where its alerts go. */
+.wsarea {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 13px 15px;
+  margin: 0 0 9px;
+  background: var(--surface-raised);
+}
+
+.wsarea__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+
+.wsarea__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.wsarea__owner {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* An unattributed area is a broken link, and it must not look like a styling variant of a valid
+   one — this is the state that made the original bug invisible. */
+.wsarea__owner[data-unlinked="true"] {
+  font-weight: 600;
+  color: #b42318;
+}
+
+.wsarea__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.wsarea__meta dt {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.wsarea__meta dd {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Modal — the one dialog in the portal.
+
+   A native <dialog>, so focus trapping, Escape, the top layer and `aria-modal` come from the
+   platform rather than from code we maintain. Only presentation lives here.
+   --------------------------------------------------------------------------- */
+
+.modal {
+  /* `<dialog>` ships a 2px border and white background in every engine; both have to go before
+     the card inside reads as the surface. */
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: min(560px, calc(100vw - 32px));
+  width: 100%;
+  /* Centred by the UA for a modal dialog; the max-height keeps a long form scrollable instead of
+     letting the card grow past the viewport and strand its submit button. */
+  max-height: min(88vh, 900px);
+  overflow: visible;
+  color: var(--text-primary);
+}
+
+.modal--wide {
+  max-width: min(760px, calc(100vw - 32px));
+}
+
+.modal::backdrop {
+  /* Not a token: `::backdrop` is outside the document tree, so custom properties defined on
+     :root do not inherit into it in every engine. A literal is the reliable choice. */
+  background: rgba(11, 0, 27, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.modal__card {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 900px);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(11, 0, 27, 0.28);
+  overflow: hidden;
+}
+
+.modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.modal__sub {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.modal__close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.modal__close:hover {
+  color: var(--text-primary);
+  border-color: var(--hairline-strong);
+}
+
+.modal__close:focus-visible {
+  outline: 2px solid var(--brand-600);
+  outline-offset: 2px;
+}
+
+/* The scroll container. On the head/body split rather than the card, so the title stays put
+   while a long form scrolls under it. */
+.modal__body {
+  padding: 18px 22px 22px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A form inside a modal supplies its own spacing; the card must not double it. */
+.modal__body > .wsform:first-child,
+.modal__body > form:first-child {
+  margin-top: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Collapsible alert rows.
+
+   Each alert is ~120 lines of markup, so a fifty-alert queue was a wall of text. The collapsed row
+   carries severity, headline, plot, when, and whether it reached anyone — enough to triage without
+   opening. The body is UNMOUNTED when closed, not hidden: it holds a TrackModules subtree per
+   alert, and fifty of those is real memory for markup nobody is reading.
+   --------------------------------------------------------------------------- */
+
+.alertrow {
+  padding: 0;
+  overflow: hidden;
+}
+
+.alertrow__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 18px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.alertrow__head:focus-visible {
+  outline: 2px solid var(--brand-600);
+  outline-offset: -2px;
+}
+
+.alertrow[data-open="true"] .alertrow__head {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.alertrow__main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* Without this a long headline forces the grid wider than its container and the chevron leaves
+     the card. */
+  min-width: 0;
+}
+
+.alertrow__title {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.alertrow__meta {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* An alert that reached nobody is the one to open first, so it is called out in the collapsed row
+   rather than only being discoverable inside. Text, not colour alone. */
+.alertrow__undelivered {
+  font-weight: 650;
+  color: #b42318;
+}
+
+.alertrow__chevron {
+  width: 18px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.alertrow__body {
+  padding: 4px 18px 18px;
+}
+
+/* On a narrow phone the badge takes its own row: at ~340px, badge + headline + chevron on one
+   line truncates the headline to uselessness. */
+@media (max-width: 420px) {
+  .alertrow__head {
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+  }
+
+  .alertrow__head > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Create-affordance and inline revoke.
+
+   `pcard__head--bare` is the header row reduced to just its action, used when a page's own list
+   already carries the heading and a second one would repeat it.
+   --------------------------------------------------------------------------- */
+
+.pcard__head--bare {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+
+/* Inline revocation, beside the key it removes rather than in a separate card — the decision
+   depends on the scopes and last-used date immediately above it. */
+.keylist__revoke {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+}
+
+.keylist__revokemsg {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.keylist__revokemsg[data-tone="ok"] {
+  color: var(--text-muted);
+}
+
+/* The status palette, and the only place a colour carries meaning here — paired with the message
+   text itself, never colour alone. */
+.keylist__revokemsg[data-tone="error"] {
+  color: #b42318;
+}
+
+/* ---------------------------------------------------------------------------
+   Touch targets — WCAG 2.5.5 / Apple HIG minimum 44x44 px.
+
+   Measured, not assumed. Computed as padding + font-size x the body's 1.6 line-height, four
+   controls came in under the minimum:
+
+     .linkbutton     20px   <- worst, and it carries "Revoke" and "Remove"
+     .modal__close   30px
+     .chanrow__drop  30px
+     .pnav__item     40px
+
+   `.btn--small` looked like a fifth (32px from its padding alone) and is NOT: it is only ever
+   applied alongside `.btn`, which sets an explicit `height: 44px` that the modifier does not
+   override. Adding padding there would have been a no-op at best. Verified by grepping every call
+   site rather than reasoning from the rule in isolation.
+
+   `.linkbutton` mattering most is the point: it is a bare underlined button with no padding, used
+   for DESTRUCTIVE actions. At 20px on a phone it is both hard to hit deliberately and easy to hit
+   by accident when reaching for something adjacent — the worst possible combination for an
+   irreversible action.
+
+   ## Why a pseudo-element rather than padding
+
+   Adding real padding to `.linkbutton` would push apart every layout it appears in — it sits inline
+   beside text in four places, and one of them is the AreaPicker's dense control row. So the visible
+   box is unchanged and an invisible `::after` extends the HIT AREA to 44px, centred on the control.
+
+   `pointer-events` is inherited by the pseudo-element, so this genuinely enlarges the tappable
+   region rather than just drawing a bigger invisible rectangle.
+
+   Scoped to coarse pointers. On a mouse the 20px target is already precise, and an overlapping
+   44px hit area on a desktop layout would swallow clicks intended for neighbouring text.
+   --------------------------------------------------------------------------- */
+
+@media (pointer: coarse) {
+  .linkbutton,
+  .chanrow__drop {
+    /* The anchor for the pseudo-element below. */
+    position: relative;
+  }
+
+  .linkbutton::after,
+  .chanrow__drop::after {
+    content: "";
+    position: absolute;
+    /* Centred on the control, so the enlarged area grows symmetrically rather than downward
+       into whatever sits beneath. */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .modal__close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .pnav__item {
+    /* 13px x 2 + 13.5 x 1.6 = 47.6px. The nav is a horizontal scroller on mobile, so taller rows
+       cost nothing — the scroll axis is horizontal. */
+    padding: 13px 14px;
+  }
+}

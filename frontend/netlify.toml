@@ -1,0 +1,42 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+# Required for Next.js App Router SSR on Netlify. Without it the server
+# components are not deployed and every route 404s.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Production site lives at shelter.zerorate.io, a ZeroRate by FreePass CDN subdomain.
+#
+# Set these in the Netlify UI (Site configuration -> Environment variables), NOT here — this
+# file is committed, and a key in it would be public:
+#
+#   SHELTER_API_URL   https://api.shelter.zerorate.io   (or your tunnel URL)
+#   SHELTER_API_KEY   shltky...                          (service-account key)
+#
+# Both are server-only and must never be prefixed NEXT_PUBLIC_ — that prefix inlines a value
+# into the client bundle, which for the key would publish a credential that can register
+# subscribers.
+#
+# The names are exact. `lib/api.ts` reads SHELTER_API_URL; anything else (API_BASE_URL,
+# API_URL) is ignored and the client falls back to http://localhost:8000 — which on Netlify
+# is the render container, so every fetch fails while the site still serves.
+#
+# Provision the key on the backend host:
+#   make iam-service-account NAME=shelter-portal EMAIL=ops@example.com
+[context.production.environment]
+  NEXT_PUBLIC_SITE_URL = "https://shelter.zerorate.io"
+
+[context.deploy-preview.environment]
+  NEXT_PUBLIC_SITE_URL = "https://deploy-preview.shelter.zerorate.io"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
