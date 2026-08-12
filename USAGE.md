@@ -738,6 +738,21 @@ and both produce the same records.
 
 ### 7.2 Channel B — the Partner API
 
+**Start with the interactive reference:**
+
+```
+https://shelter-api.zerorate.io/dev-docs          (or /shelter/v1/api/dev-docs)
+```
+
+ReDoc, rendered from the **filtered** spec: 29 paths, every one of them reachable with an
+aggregator key. It is deliberately not `/docs` — that describes the whole service, operator
+endpoints included, so a partner reading it finds routes their key can never call. Every field,
+and what each optional one changes downstream, is documented on the operation itself.
+
+Ungated on purpose: a developer must be able to generate a client before they hold a credential.
+The machine-readable spec is at `/dev-docs/openapi.json`, with `Access-Control-Allow-Origin: *` so
+a browser-based generator can read it.
+
 **You must mint your own key in the portal first.** There is no key issued at signup —
 an account that never integrates should not hold a live credential nobody is watching.
 

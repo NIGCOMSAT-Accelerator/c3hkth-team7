@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app import scheduler
 from app.api.routes import (
@@ -350,6 +350,33 @@ app.include_router(iam.router, prefix=settings.api_prefix)
 app.include_router(devdocs.router, prefix=settings.api_prefix)
 
 
+@app.get("/dev-docs", include_in_schema=False)
+async def dev_docs_shortcut() -> RedirectResponse:
+    """Redirect the bare `/dev-docs` to the prefixed route.
+
+    ## Why a redirect rather than a second copy of the page
+
+    `https://shelter-api.zerorate.io/dev-docs` is what a person types, and what gets pasted into a
+    partner email — the `/shelter/v1/api` prefix is an implementation detail nobody remembers. It
+    returned a bare 404, which reads as "the docs are not deployed" rather than "you missed a path
+    segment".
+
+    A redirect rather than mounting the handler twice, because the page's own asset URLs are built
+    from `settings.api_prefix` (`spec_url`, the favicon). Serving the same HTML at an unprefixed
+    path would render a page whose spec and icon still point at the prefixed one — working, but with
+    two URLs for one document and only one of them self-consistent.
+
+    **307, not 301.** A permanent redirect is cached by the browser essentially forever, so if the
+    prefix ever changes — it is `API_PREFIX`, and configurable — every previous visitor keeps being
+    sent to a path that no longer exists, with no way to clear it but a hard reload they will not
+    think to try.
+    """
+    return RedirectResponse(
+        url=f"{settings.api_prefix}/dev-docs",
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    )
+
+
 @app.get("/", tags=["meta"])
 async def root() -> dict:
     """Service discovery.
@@ -368,6 +395,17 @@ async def root() -> dict:
         "api_base": settings.api_prefix,
         "docs": f"{settings.api_prefix}/docs",
         "openapi": f"{settings.api_prefix}/openapi.json",
+        # The PARTNER reference, listed beside `/docs` because they are different documents and
+        # this is the one to send an integrator.
+        #
+        # `/docs` describes the whole service, internal operator endpoints included — a partner
+        # reading it finds routes their key can never call. `/dev-docs` renders the FILTERED spec
+        # (`devdocs.partner_schema`), so everything in it is reachable with an aggregator key.
+        #
+        # Absent from this index until now, which made it undiscoverable: it is `include_in_schema=
+        # False`, so it appears in neither `/docs` nor `/openapi.json` either. The only way to find
+        # it was to be told the URL.
+        "dev_docs": f"{settings.api_prefix}/dev-docs",
         "health": f"{settings.api_prefix}/health",
         "site": settings.public_site_url,
     }
