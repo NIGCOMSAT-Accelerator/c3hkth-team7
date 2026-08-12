@@ -102,11 +102,32 @@ Nothing crashes when a credential is absent. Each gap has a documented fallback:
 ### 2.4 The settings you must set before a public deploy
 
 ```bash
-API_KEY=            # blank in the template. Required in production — see §5.1
-IAM_SESSION_SECRET= # signs portal sessions
-POSTGRES_PASSWORD=  # the compose default is a DEV credential
+API_KEY=              # blank in the template. Required in production — see §5.1
+IAM_JWT_SECRET=       # signs portal sessions. MUST differ from API_KEY
+POSTGRES_PASSWORD=    # the compose default is a DEV credential
 MINIO_ROOT_PASSWORD=
+WEBHOOK_SIGNING_SECRET=   # lets a partner verify an alert came from SHELTER
+IAM_LEGACY_SHARED_KEY_ENABLED=false   # required once API_KEY and MONGO_URL are both set
 ```
+
+Generate them with `openssl rand -hex 32` (or `secrets.token_urlsafe(48)`).
+`POSTGRES_PASSWORD` should be **alphanumeric only** — it is interpolated into a DSN
+(`postgresql://shelter:PASSWORD@postgres:5432/shelter`), so an `@ : / ? #` corrupts the URL.
+
+Two of these are error-level in production and will stop the container from booting, which is
+deliberate — *"Nothing has started, so no traffic was served against a broken deployment"*:
+
+  * **`IAM_JWT_SECRET`** — note the name. `IAM_SESSION_SECRET` is **not** a setting;
+    pydantic-settings runs with `extra="ignore"`, so it is accepted, discarded, and preflight then
+    fails with *"IAM_JWT_SECRET is unset"*. Without it session signing falls back to `API_KEY`,
+    which the frontend also holds — so anyone able to read the frontend's environment could forge
+    a session for any account. Preflight also refuses to boot if the two are equal.
+  * **`IAM_LEGACY_SHARED_KEY_ENABLED=false`** — required whenever `API_KEY` **and** `MONGO_URL`
+    are both set. Holding both means the shared `X-SHELTER-Key` still gates 29 write endpoints,
+    including NIGCOMSAT broadcast, with no attribution or scoping.
+
+Run `python -m app.preflight` (or just start the stack) to see exactly what is missing — it names
+each fault and what to do about it, rather than failing on the first one.
 
 `app/preflight.py` refuses to boot in `ENVIRONMENT=production` with the dev defaults
 still in place. `tests/test_config.py` fails the build if a credential is given a
@@ -134,9 +155,118 @@ resolved provider. **Neither the daily budget nor a token ceiling can gate advis
 generation**, and a test enforces that: a warning must never fail to reach a farmer
 because of spend.
 
+### 2.6 Getting an API key — needed by the frontend, not by the backend
+
+The **backend runs with no key at all** in development. The **frontend needs one**: `lib/api.ts`
+sends it on every server-side call, and without it the area picker returns 401 and nobody can
+choose a plot to monitor.
+
+The stack must be up first, because the key is minted into MongoDB:
+
+```bash
+make up
+make iam-service-account NAME=local-frontend EMAIL=you@example.com
+```
+
+It prints the key **once** — it is hashed at rest and cannot be recovered:
+
+```
+  API KEY — shown once, not recoverable:
+    shltky...
+```
+
+Put that in `frontend/.env.local` as `SHELTER_API_KEY` (see §4). The key carries exactly
+`platform:subscribers:write`, `platform:read` and `platform:assess` — deliberately **not**
+`platform:broadcast`, so a leak of the frontend's environment cannot page a district.
+
+**`MONGO_URL` must be set for this to work**, and for anyone to sign in at all: IAM lives in
+MongoDB. A free Atlas cluster is enough. Without it the portal's signup and login return 503 while
+the satellite pipeline keeps running — the pipeline and identity are independent by design.
+
 ---
 
 ## 3. Build & run locally
+
+### 3.0 Two complete paths, start to finish
+
+Both end with the portal on **http://localhost:3000** and a real satellite assessment. Pick one.
+
+#### Path A — Docker for the backend, Node for the frontend *(recommended)*
+
+Needs only **Docker** and **Node 20–24**. No Python, no GDAL, no geospatial toolchain on your
+machine.
+
+```bash
+# 1. Backend — one command, no credentials needed
+git clone <repo> && cd c3hkth-team7
+make env                       # writes .env from the template
+make up                        # postgres + dragonfly + minio + api + 2 workers
+make health                    # every store should read "up"
+
+# 2. IAM — required for sign-in. Put a MongoDB URL in .env, then restart the API.
+#    A free Atlas cluster is enough; see §2.6.
+#    MONGO_URL=mongodb+srv://...
+docker compose up -d --force-recreate api
+
+# 3. Mint the frontend's key (prints once — copy it)
+make iam-service-account NAME=local-frontend EMAIL=you@example.com
+
+# 4. Frontend
+cd frontend
+nvm use 24                     # Node 26 ships an npm that crashes in this project
+npm install
+printf 'SHELTER_API_URL=http://localhost:8000\nSHELTER_API_KEY=<the shltky... key>\n' > .env.local
+npm run dev                    # http://localhost:3000
+```
+
+Then sign up in the browser, define a plot, and press **Check now** on `/portal/areas` — that runs
+a live STAC search, windowed COG reads and two model forward passes, and takes 10–40 seconds.
+
+#### Path B — no Docker at all
+
+Needs **Python 3.10–3.12** (torch publishes no 3.13/3.14 wheels), **Node 20–24**, and GDAL/PROJ on
+the host for `rasterio`/`pyproj`. You also need Postgres, Redis-compatible storage and S3-compatible
+storage of your own.
+
+```bash
+# Datastores: either your own, or borrow the ones from compose with host ports published
+make dev                       # same stack, ports bound to 127.0.0.1 only
+
+cd backend
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Point at whatever you are running. These are `make dev`'s published ports:
+export POSTGRES_DSN=postgresql://shelter:shelter@localhost:5432/shelter
+export REDIS_URL=redis://localhost:6379/0
+export CACHE_URL=redis://localhost:6379/1
+export S3_ENDPOINT=localhost:9000
+export S3_ACCESS_KEY=shelter S3_SECRET_KEY=shelter-dev-secret
+
+python -m app.preflight        # says exactly what is missing, if anything
+uvicorn app.main:app --reload  # :8000, API + the autonomous watch loop
+
+# In a second shell — the queue consumers
+python -m app.queue.worker     # all five stages in one process
+```
+
+Frontend is identical to Path A step 4.
+
+**Without model weights** (`app/ml/weights/*.pt`, gitignored) inference falls back to documented
+physical thresholds — SAR VV < −16 dB, NDVI < 0.35 — at confidence **0.55** instead of 0.88. That
+is intentional: the system degrades to defensible threshold science rather than to nothing. The
+weights are baked into the published Docker image, so **Path A has them and Path B does not**.
+
+#### What works with an untouched `.env`
+
+Everything in the satellite path. All 16 upstreams have a keyless primary, so scene discovery,
+COG reads, the rainfall chain, soil moisture, land cover, population and the malaria baseline all
+answer with no credentials. Risk scoring is deterministic and needs no model provider.
+
+What needs a credential: **sign-in** (`MONGO_URL`), **email** (`BREVO_API_KEY` — otherwise a
+dispatch returns SKIPPED and nothing raises), **LLM-written advisories** (otherwise deterministic
+English templates), and **verification** (`SEARXNG_URL` — otherwise Fahis records
+`NOT_ATTEMPTED`, which is an outage and explicitly not a finding).
 
 ### 3.1 The whole backend
 
@@ -233,9 +363,17 @@ Point it at the API:
 
 ```bash
 # frontend/.env.local
-SHELTER_API_URL=http://localhost:8000/shelter/v1/api
-SHELTER_API_KEY=<a platform key>
+SHELTER_API_URL=http://localhost:8000      # ORIGIN ONLY — no /shelter/v1/api
+SHELTER_API_KEY=shltky...                  # from `make iam-service-account`
 ```
+
+**The URL is the origin, without the path.** `lib/api.ts` builds
+`${SHELTER_API_URL}${SHELTER_API_PREFIX}${path}` and the prefix defaults to
+`/shelter/v1/api`, so including it here produces
+`http://localhost:8000/shelter/v1/api/shelter/v1/api/health` — which 404s on every call.
+`safeApi` then degrades every page rather than erroring, so the site renders **empty** and
+reads as "the backend is down". This exact mistake cost an afternoon on the hosted
+deployment.
 
 **Never rename these `NEXT_PUBLIC_*`.** `lib/api.ts` is `server-only` and the key
 authorises subscriber registration and broadcasts — exposing it to the browser would
@@ -255,7 +393,7 @@ degrading the page instead of 500ing.
 ```bash
 git clone <repo> && cd c3hkth-team7
 make env
-# edit .env: API_KEY, IAM_SESSION_SECRET, POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD
+# edit .env: API_KEY, IAM_JWT_SECRET, POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD  (see §2.4)
 make up          # API on :8000, datastores internal-only
 ```
 
@@ -330,10 +468,19 @@ without that label is the classic "works after this restart, breaks after the ne
 Set these in Dokploy's environment panel, then paste the manifest and deploy:
 
 ```
-SHELTER_API_IMAGE / SHELTER_API_TAG      from `make release-api`
-SHELTER_UI_IMAGE  / SHELTER_UI_TAG       from `make release-ui`
-API_KEY  IAM_SESSION_SECRET  POSTGRES_PASSWORD  MINIO_ROOT_PASSWORD
+API_KEY                 a platform service key (see §2.6)
+IAM_JWT_SECRET          signs sessions — MUST differ from API_KEY
+POSTGRES_PASSWORD       alphanumeric (it goes into a DSN)
+MINIO_ROOT_PASSWORD
+MONGO_URL               required for IAM — without it nobody can sign in
+IAM_LEGACY_SHARED_KEY_ENABLED=false
+WEBHOOK_SIGNING_SECRET  optional but recommended
 ```
+
+**Image tags are pinned in the manifest, not supplied by environment.** The four `image:` lines
+carry an explicit `{service}_{date}_{sha}` tag; update all four together after a release. Three run
+the API image (`shelter-api`, `worker`, `worker-analyst` — same build, different command, so a
+mismatch means the queue runs different code from the API) and one runs the UI.
 
 **No secret has a fallback default.** Compose refuses to interpolate without them, which is a clear
 failure at deploy time rather than a stack that starts cleanly and is quietly insecure.

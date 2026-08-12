@@ -282,8 +282,12 @@ fi
 
 step "Ready"
 say "   Image      ${BOLD}${IMAGE}:${TAG}${RESET}"
-say "   Also tags  ${IMAGE}:latest"
 say "   Platforms  linux/amd64, linux/arm64"
+# Stated positively, because the absence of `latest` is a deliberate choice and a reader who
+# expects it should learn why here rather than wonder whether the push half-failed.
+say "   ${DIM}One tag only — \`latest\` is not published. It would bill a second manifest per${RESET}"
+say "   ${DIM}release and name a different image after each one. Alias it deliberately with${RESET}"
+say "   ${DIM}\`make retag TAG=${TAG} ALIAS=latest\` if you want a floating pointer.${RESET}"
 say ""
 confirm "Build and push?" || die "aborted"
 
@@ -293,17 +297,100 @@ step "Tests"
 make --no-print-directory check || die "checks failed — nothing was pushed"
 
 step "Build and push"
-docker buildx inspect shelter-builder >/dev/null 2>&1 \
-    || docker buildx create --name shelter-builder --use --bootstrap >/dev/null
-docker buildx use shelter-builder
+
+# ---------------------------------------------------------------------------- #
+# Builder selection — and why the UI build needs a NATIVE one
+# ---------------------------------------------------------------------------- #
+#
+# The `docker-container` driver builds foreign architectures through an emulator, and WHICH
+# emulator decides whether the frontend builds at all.
+#
+# ## On Apple Silicon: enable Rosetta, or the UI build cannot succeed
+#
+# Under QEMU the Next.js build dies:
+#
+#     [linux/amd64 builder 5/5] RUN npm run build
+#     ▲ Next.js 16.3.0 (Turbopack)
+#     qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+#
+# Turbopack is a native Rust binary and QEMU mistranslates its threading/SIMD. `next build
+# --webpack` avoids Turbopack but then *stalls* indefinitely under QEMU — measured at 0% CPU after
+# 26 minutes — so this is not a bundler problem to work around in the Dockerfile.
+#
+# **Docker Desktop's Rosetta backend fixes it completely.** Measured on an M4 Pro, macOS 26.5:
+# the amd64 `npm run build` compiles in 6.1s and the whole builder stage finishes in 18s, with no
+# emulator warnings. A full `linux/amd64,linux/arm64` build exits 0.
+#
+#     Docker Desktop → Settings → General →
+#         "Use Rosetta for x86_64/amd64 emulation on Apple Silicon"   ✓
+#
+# (Same as `UseVirtualizationFrameworkRosetta: true` in
+# ~/Library/Group Containers/group.com.docker/settings-store.json. Docker Desktop must be
+# restarted for it to take effect.)
+#
+# So a local multi-arch release IS possible on Apple Silicon — a cloud or native builder is a
+# speed and capacity choice, not a requirement.
+#
+# Order of preference — LOCAL FIRST, deliberately:
+#
+#   1. $BUILDER, if the caller named one explicitly (make release-ui BUILDER_OVERRIDE=…)
+#   2. shelter-builder, created on demand — local, no account, no quota, and with Rosetta enabled
+#      it builds both architectures correctly
+#
+# A cloud builder is NOT auto-selected, even when one is configured. It looks faster and is, until
+# the subscription runs out: every node still reports `running`, `buildx inspect --bootstrap` still
+# succeeds, and the build is then refused with `build cannot proceed concurrent build limit of 0
+# reached` — *after* the context upload. There is no cheap pre-flight that distinguishes the two
+# states, so auto-preferring it converts a working local build into a late failure on someone
+# else's billing cycle. Opting in is one variable:
+#
+#     make release-ui BUILDER_OVERRIDE=cloud-acme-ci
+BUILDER_NAME="${BUILDER:-}"
+
+if [ -z "$BUILDER_NAME" ]; then
+    BUILDER_NAME="shelter-builder"
+    docker buildx inspect "$BUILDER_NAME" >/dev/null 2>&1 \
+        || docker buildx create --name "$BUILDER_NAME" --driver docker-container --bootstrap >/dev/null
+    # A local container builder emulates the other architecture, which is fine — PROVIDED the
+    # emulator is Rosetta and not QEMU. Checked rather than assumed, and only for the UI, because
+    # that is the build QEMU breaks; the backend merely crawls.
+    #
+    # The probe is the setting itself rather than a test build: reading a JSON key costs nothing,
+    # whereas discovering the answer by building takes ~25 minutes to fail.
+    if [ "$SERVICE" = "ui" ] && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+        rosetta_setting="${HOME}/Library/Group Containers/group.com.docker/settings-store.json"
+        if grep -q '"UseVirtualizationFrameworkRosetta": *true' "$rosetta_setting" 2>/dev/null; then
+            ok "Rosetta is enabled — cross-arch UI build works (measured: amd64 compile in ~6s)"
+        else
+            warn "Docker Desktop is using QEMU, not Rosetta, for amd64"
+            say "   ${DIM}The Next.js build WILL fail under QEMU: Turbopack segfaults, and${RESET}"
+            say "   ${DIM}--webpack stalls indefinitely. Enable Rosetta and restart Docker:${RESET}"
+            say "   ${DIM}  Settings → General → \"Use Rosetta for x86_64/amd64 emulation\"${RESET}"
+            say "   ${DIM}Or build a single architecture natively:${RESET}"
+            say "   ${DIM}  make release-ui PLATFORMS=linux/arm64${RESET}"
+            confirm "Continue anyway?" || die "aborted"
+        fi
+    fi
+fi
+
+docker buildx use "$BUILDER_NAME" 2>/dev/null || die "cannot select builder ${BUILDER_NAME}"
+say "   ${DIM}Builder: ${BUILDER_NAME}${RESET}"
 
 # --push rather than build-then-push: buildx assembles the manifest list during the push, so
 # a separate `docker push` would have nothing local to send.
+# ONE tag. `latest` is deliberately not pushed: it doubles the manifests billed per release,
+# and a moving tag means a deployment pinned to it changes under a restart nobody performed.
+# `make retag TAG=… ALIAS=latest` adds an alias without rebuilding, when one is actually wanted.
+# PLATFORMS is overridable so a single-arch escape hatch exists when emulation is the blocker:
+#
+#     make release-ui PLATFORMS=linux/arm64        # host arch only, no emulation, always works
+#
+# A Dokploy VPS is usually amd64, so check `make manifest` matches your host before relying on a
+# single-arch push — an image built arm64-only will not run there.
 docker buildx build \
-    --platform linux/amd64,linux/arm64 \
+    --platform "${PLATFORMS:-linux/amd64,linux/arm64}" \
     --push \
     -t "${IMAGE}:${TAG}" \
-    -t "${IMAGE}:latest" \
     --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=max" \
     --cache-from "type=registry,ref=${IMAGE}:buildcache" \
     "$CONTEXT"

@@ -59,6 +59,18 @@ PLATFORMS ?= linux/amd64,linux/arm64
 # Buildx builder name. Created on demand by `make buildx`.
 BUILDER ?= shelter-builder
 
+# What the interactive release targets forward as $BUILDER.
+#
+# Deliberately EMPTY by default, and deliberately not `BUILDER` itself: an empty value tells
+# `scripts/release.sh` "choose for me", and it then prefers a native cloud builder over local
+# emulation. Defaulting this to `shelter-builder` would pin every release to the QEMU path — which
+# is merely slow for the backend and a hard segfault for the Next.js/Turbopack build.
+#
+# Naming a builder explicitly still works and still wins:
+#
+#     make release-ui BUILDER_OVERRIDE=cloud-acme-ci_linux-amd64
+BUILDER_OVERRIDE ?=
+
 BACKEND_IMAGE  := $(REGISTRY)/shelter-api
 FRONTEND_IMAGE := $(REGISTRY)/shelter-web
 
@@ -429,21 +441,47 @@ buildx: ## Create/select the multi-arch builder (idempotent)
 # Makefile should make on their behalf. A cloud builder also usually belongs to some other
 # project's org, whose cache and retention we do not control.
 #
-# Opting in is one variable:  make release BUILDER=<name>
+# Opting in is one variable:  make release-api BUILDER_OVERRIDE=<name>
 	@cloud=$$(docker buildx ls --format json 2>/dev/null \
 	           | grep '"Driver":"cloud"' \
 	           | grep -o '"Name":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$$//'); \
 	  if [ -n "$$cloud" ] && [ "$(BUILDER)" != "$$cloud" ]; then \
 	    echo; \
 	    echo "A cloud builder is configured: $$cloud (native arm64, no emulation)."; \
-	    echo "Not used by default — it uploads the context, weights and *.mmdb included."; \
-	    echo "To opt in:  make release BUILDER=$$cloud"; \
+	    echo "Not used by default — it uploads the context, weights and *.mmdb included,"; \
+	    echo "and a subscription that is out of capacity fails only AFTER that upload."; \
+	    echo "To opt in:  make release-api BUILDER_OVERRIDE=$$cloud"; \
 	  fi
+
+# ---------------------------------------------------------------------------
+# ONE TAG PER BUILD — `latest` is never published
+#
+# Every build and push target below tags exactly `$(TAG)` and nothing else.
+#
+# `latest` used to be pushed alongside it, and it cost real money and real clarity:
+#
+#   * **Storage and transfer.** A second tag means a second manifest list plus its
+#     per-arch children on the registry, and a second push of those pointers on every
+#     release. On a metered plan that is billed twice for one artefact.
+#   * **A moving tag is not reproducible.** `latest` names a different image after every
+#     release, so a deployment pinned to it changes under a restart nobody performed.
+#     `$(TAG)` is `{service}_{date}_{sha}` and always identifies one build.
+#   * **It is the wrong default for compose.** A machine that already holds
+#     `shelter-api:latest` reuses it rather than pulling, which is how a "deployed" fix
+#     turns out to be the previous image.
+#
+# If a floating tag is genuinely wanted, add it deliberately and separately:
+#
+#     make retag TAG=api_2026-08-12_a1b2c3d ALIAS=latest
+#
+# That copies the manifest without rebuilding, so the alias is an explicit act rather
+# than a side effect of every release.
+# ---------------------------------------------------------------------------
 
 .PHONY: image-backend
 image-backend: buildx ## Build the backend image for all platforms (cache only)
 	docker buildx build --platform $(PLATFORMS) \
-	  -t $(BACKEND_IMAGE):$(TAG) -t $(BACKEND_IMAGE):latest \
+	  -t $(BACKEND_IMAGE):$(TAG) \
 	  --cache-from type=registry,ref=$(BACKEND_IMAGE):buildcache \
 	  ./backend
 
@@ -451,7 +489,7 @@ image-backend: buildx ## Build the backend image for all platforms (cache only)
 image-frontend: buildx ## Build the frontend image for all platforms (cache only)
 	docker buildx build --platform $(PLATFORMS) \
 	  --build-arg NEXT_PUBLIC_SITE_URL=$${NEXT_PUBLIC_SITE_URL:-http://localhost:3000} \
-	  -t $(FRONTEND_IMAGE):$(TAG) -t $(FRONTEND_IMAGE):latest \
+	  -t $(FRONTEND_IMAGE):$(TAG) \
 	  --cache-from type=registry,ref=$(FRONTEND_IMAGE):buildcache \
 	  ./frontend
 
@@ -539,18 +577,26 @@ release: release-api ## Alias for `release-api` — the backend is the usual rel
 # ---------------------------------------------------------------------------
 
 .PHONY: release-api
+# `BUILDER` and `PLATFORMS` are forwarded explicitly.
+#
+# Make variables are NOT inherited by a recipe's child process unless exported, so
+# `make release-ui BUILDER=my-cloud` set the make variable and the script saw nothing — it went on
+# using `shelter-builder` and emulated. The two that matter are passed on the command line.
+#
+# `BUILDER=` empty is the normal case and means "let the script choose": it prefers a cloud
+# builder (native amd64 AND arm64) and falls back to a local container builder.
 release-api: ## Interactive multi-arch release of SHELTER-API (prompts registry, repo, tag, PAT)
-	@bash scripts/release.sh api
+	@BUILDER="$(BUILDER_OVERRIDE)" PLATFORMS="$(PLATFORMS)" bash scripts/release.sh api
 
 .PHONY: release-ui
 release-ui: ## Interactive multi-arch release of SHELTER-UI (prompts registry, repo, tag, PAT)
-	@bash scripts/release.sh ui
+	@BUILDER="$(BUILDER_OVERRIDE)" PLATFORMS="$(PLATFORMS)" bash scripts/release.sh ui
 
 .PHONY: release-both
 release-both: ## Release SHELTER-API then SHELTER-UI, prompting for each
-	@bash scripts/release.sh api
+	@BUILDER="$(BUILDER_OVERRIDE)" PLATFORMS="$(PLATFORMS)" bash scripts/release.sh api
 	@echo
-	@bash scripts/release.sh ui
+	@BUILDER="$(BUILDER_OVERRIDE)" PLATFORMS="$(PLATFORMS)" bash scripts/release.sh ui
 
 # The non-interactive path, for CI. Same output, every value from the environment.
 #
@@ -561,13 +607,13 @@ release-both: ## Release SHELTER-API then SHELTER-UI, prompting for each
 .PHONY: release-ci
 release-ci: check geoip-verify buildx ## Non-interactive release for CI (no prompts)
 	docker buildx build --platform $(PLATFORMS) --push \
-	  -t $(BACKEND_IMAGE):$(TAG) -t $(BACKEND_IMAGE):latest \
+	  -t $(BACKEND_IMAGE):$(TAG) \
 	  --cache-to type=registry,ref=$(BACKEND_IMAGE):buildcache,mode=max \
 	  --cache-from type=registry,ref=$(BACKEND_IMAGE):buildcache \
 	  ./backend
 	docker buildx build --platform $(PLATFORMS) --push \
 	  --build-arg NEXT_PUBLIC_SITE_URL=$${NEXT_PUBLIC_SITE_URL:-http://localhost:3000} \
-	  -t $(FRONTEND_IMAGE):$(TAG) -t $(FRONTEND_IMAGE):latest \
+	  -t $(FRONTEND_IMAGE):$(TAG) \
 	  --cache-to type=registry,ref=$(FRONTEND_IMAGE):buildcache,mode=max \
 	  --cache-from type=registry,ref=$(FRONTEND_IMAGE):buildcache \
 	  ./frontend
@@ -580,7 +626,7 @@ release-ci: check geoip-verify buildx ## Non-interactive release for CI (no prom
 .PHONY: release-backend
 release-backend: check buildx ## Test, then build+push the backend as multi-arch
 	docker buildx build --platform $(PLATFORMS) --push \
-	  -t $(BACKEND_IMAGE):$(TAG) -t $(BACKEND_IMAGE):latest \
+	  -t $(BACKEND_IMAGE):$(TAG) \
 	  --cache-to type=registry,ref=$(BACKEND_IMAGE):buildcache,mode=max \
 	  --cache-from type=registry,ref=$(BACKEND_IMAGE):buildcache \
 	  ./backend
@@ -605,6 +651,27 @@ manifest: ## Show which architectures a pushed tag actually contains
 	@echo "$(FRONTEND_IMAGE):$(TAG)"
 	@docker buildx imagetools inspect $(FRONTEND_IMAGE):$(TAG) 2>/dev/null \
 	  | grep -E "Platform:" || echo "  (not pushed yet)"
+
+# Add a floating alias to an ALREADY-PUSHED tag, without rebuilding.
+#
+# This is the deliberate replacement for pushing `latest` on every release. `imagetools create`
+# copies the manifest list registry-side — no pull, no build, no second upload of the layers,
+# which are already there and content-addressed. So an alias costs one small manifest write
+# instead of a whole second push.
+#
+#     make retag TAG=api_2026-08-12_a1b2c3d ALIAS=latest          # backend (default)
+#     make retag SERVICE=ui TAG=ui_2026-08-12_a1b2c3d ALIAS=demo  # frontend
+#
+# Both architectures come along automatically: the source is a manifest list, and copying it
+# copies the pointers to every child. `make manifest` afterwards proves it.
+.PHONY: retag
+retag: ## Alias a pushed tag without rebuilding: make retag TAG=… ALIAS=latest [SERVICE=api|ui]
+	@test -n "$(ALIAS)" || { echo "usage: make retag TAG=<pushed-tag> ALIAS=<new-tag> [SERVICE=api|ui]"; exit 1; }
+	@test "$(TAG)" != "$(ALIAS)" || { echo "TAG and ALIAS are identical — nothing to do"; exit 1; }
+	@img=$(if $(filter ui,$(SERVICE)),$(FRONTEND_IMAGE),$(BACKEND_IMAGE)); \
+	  echo "==> $$img:$(TAG)  ->  $$img:$(ALIAS)"; \
+	  docker buildx imagetools create -t "$$img:$(ALIAS)" "$$img:$(TAG)" \
+	    && echo "    aliased (manifest copied registry-side; no layers re-uploaded)"
 
 .PHONY: config
 config: ## Show the resolved compose config

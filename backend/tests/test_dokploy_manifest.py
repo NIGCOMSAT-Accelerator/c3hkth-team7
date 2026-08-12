@@ -253,19 +253,73 @@ def test_every_named_network_is_declared(manifest: str, services: dict[str, str]
     assert not missing, f"these networks are used but never declared: {missing}"
 
 
-def test_the_internal_network_has_no_gateway(manifest: str):
-    """`internal: true` is the boundary, not decoration.
+def test_the_private_network_must_not_be_internal(manifest: str):
+    """**`internal: true` is deliberately ABSENT, and this test guards its absence.**
 
-    It removes the gateway from the bridge, so a container attached only to `shelter` cannot reach
-    the internet and cannot be reached from it. Without it the datastores are one firewall
-    misconfiguration away from being addressable.
+    It was set, on the reasoning that it keeps the datastores off the internet. That reasoning is
+    right about the datastores and wrong about the network: `internal` is a property of the NETWORK,
+    and both worker pools are attached to `shelter` alone. An internal bridge has no gateway, so
+    with it set a worker cannot reach a single upstream:
+
+        STAC catalogues   -> Scout discovers no scenes
+        COG range reads   -> the Analyst measures nothing
+        rainfall chain    -> no forecast, ever
+        MongoDB Atlas     -> IAM unreachable
+        Brevo             -> the Herald sends no advisory
+
+    And every one of those degrades QUIETLY, because this codebase degrades rather than crashes.
+    The stack comes up healthy, passes every probe, and produces assessments containing no
+    satellite data — a warning service reporting nothing wrong because it can see nothing.
+
+    Verified against a real deployment: with `internal` removed, a worker resolves and connects to
+    `earth-search.aws.element84.com` and a live STAC search returns Sentinel-2 scenes; the
+    datastores remain unreachable from `dokploy-network`.
+
+    The isolation is asserted by the two tests below instead, which check what actually provides
+    it: no published ports, and no datastore on the public network.
     """
     top = manifest.split("services:")[0]
-    block = re.search(r"^  shelter:\n((?:    .*\n)+)", top, re.M)
+    # `(?:    .*\n)*` — zero or more indented lines, not one or more.
+    #
+    # `shelter:` legitimately has NO keys now: the `driver:` was removed so each orchestrator picks
+    # its own default (bridge under compose, overlay under Swarm). The `+` form then matched nothing
+    # and this test failed with "no shelter network is declared" against a manifest where it is
+    # declared perfectly well — a false negative that reads like a missing network.
+    block = re.search(r"^  shelter:\n((?:    .*\n)*)", top, re.M)
     assert block, "no `shelter` network is declared"
-    assert "internal: true" in block.group(1), (
-        "the shelter network is not internal, so the datastores sit on a bridge with a gateway"
+    assert "internal: true" not in block.group(1), (
+        "the shelter network is `internal: true`, which removes the gateway — the workers are on "
+        "this network only, so Scout, the Analyst and the Herald all lose outbound HTTPS and the "
+        "pipeline silently measures nothing"
     )
+
+
+def test_no_service_publishes_a_host_port(manifest: str):
+    """What actually keeps the datastores private, now that `internal` is gone.
+
+    A `ports:` mapping binds on the VPS itself, which is the one change that would expose Postgres
+    or MinIO to the internet regardless of network topology.
+    """
+    assert "\n    ports:" not in manifest, (
+        "a service publishes a host port. Nothing in this stack should: the two public services "
+        "are reached through Traefik on dokploy-network, and the datastores must not be reachable "
+        "at all."
+    )
+
+
+def test_no_datastore_joins_the_public_network(services: dict[str, str]):
+    """The second half of the boundary: only shelter-ui and shelter-api may touch Traefik's network.
+
+    Uses the `services` fixture rather than a fresh regex. A hand-rolled block matcher is exactly
+    what the fixture's own docstring warns about — an earlier one swallowed several services and
+    failed five tests against a correct manifest.
+    """
+    for name in INTERNAL:
+        assert name in services, f"service {name} not found in the manifest"
+        assert "dokploy-network" not in services[name], (
+            f"{name} is attached to dokploy-network, which puts it behind Traefik and on the same "
+            f"bridge as the public services"
+        )
 
 
 def test_the_public_network_is_external(manifest: str):
