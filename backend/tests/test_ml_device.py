@@ -443,3 +443,76 @@ def test_different_causes_give_different_dominant_drivers():
     # And the moisture case must NOT be attributed to history.
     moisture_driver = inference.dominant_crop_driver(moisture)
     assert moisture_driver is None or moisture_driver[0] != "anomaly"
+
+
+# --------------------------------------------------------------------------- #
+# NNPACK — a warning, not a computation
+# --------------------------------------------------------------------------- #
+
+
+def test_cpu_resolution_disables_the_nnpack_backend(monkeypatch):
+    """`worker-analyst-1` logged `Could not initialize NNPACK! Reason: Unsupported hardware.`
+
+    NNPACK is one convolution backend among several; it needs CPU features a hypervisor may mask.
+    torch falls back to its own kernels, so the message is benign — but it is emitted from C++ on
+    every worker start, so it lands in the runtime console as an unstructured line among structured
+    JSON, indistinguishable at a glance from a real degradation like `worldpop lookup failed`.
+
+    Asserted on the CPU path only: on CUDA/MPS the backend is irrelevant and touching a global flag
+    would be gratuitous.
+    """
+    calls: list[bool] = []
+
+    class _NNPack:
+        @staticmethod
+        def set_flags(value):
+            calls.append(value)
+
+    monkeypatch.setattr(torch.backends, "nnpack", _NNPack(), raising=False)
+    device = _fresh_device(monkeypatch, "cpu")
+
+    assert device.type == "cpu"
+    assert calls == [False], "the CPU path must disable NNPACK exactly once"
+
+
+def test_disabling_nnpack_does_not_change_a_single_number():
+    """**The claim that makes suppressing it acceptable**, checked rather than assumed.
+
+    If NNPACK selection changed results, silencing the warning would be hiding a divergence in the
+    numbers the flood and crop-stress models produce. It does not: the same convolution is bitwise
+    identical with the backend enabled and disabled. Verified in the built image too, where the
+    warning actually fires — 2.2 on the training Mac has no `backends.nnpack` namespace at all.
+    """
+    torch.manual_seed(0)
+    x = torch.randn(1, 2, 64, 64)
+    conv = torch.nn.Conv2d(2, 8, 3, padding=1).eval()
+
+    nnpack = getattr(torch.backends, "nnpack", None)
+    if not hasattr(nnpack, "set_flags"):
+        pytest.skip("this torch has no NNPACK backend to toggle")
+
+    with torch.no_grad():
+        nnpack.set_flags(True)
+        enabled = conv(x)
+        nnpack.set_flags(False)
+        disabled = conv(x)
+
+    assert torch.equal(enabled, disabled)
+
+
+def test_a_torch_without_the_nnpack_namespace_still_resolves(monkeypatch):
+    """torch 2.2 — the version on the training Mac — has no `backends.nnpack`.
+
+    A cosmetic tweak must never be the thing that stops a device resolving, so absence of the
+    namespace, and a `set_flags` that raises, both have to be non-events.
+    """
+    monkeypatch.delattr(torch.backends, "nnpack", raising=False)
+    assert _fresh_device(monkeypatch, "cpu").type == "cpu"
+
+    class _Angry:
+        @staticmethod
+        def set_flags(value):
+            raise RuntimeError("no")
+
+    monkeypatch.setattr(torch.backends, "nnpack", _Angry(), raising=False)
+    assert _fresh_device(monkeypatch, "cpu").type == "cpu"

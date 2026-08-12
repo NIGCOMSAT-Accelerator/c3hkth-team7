@@ -454,9 +454,34 @@ buildx: ## Create/select the multi-arch builder (idempotent)
 	  fi
 
 # ---------------------------------------------------------------------------
-# ONE TAG PER BUILD — `latest` is never published
+# ONE TAG PER BUILD — neither `latest` NOR `buildcache` is ever published
 #
 # Every build and push target below tags exactly `$(TAG)` and nothing else.
+#
+# Two things were removed for the same reason, and the second was the more expensive:
+#
+#   `latest`      a second manifest list per release. See the detail below.
+#   `buildcache`  `--cache-to type=registry,mode=max` pushed EVERY intermediate layer of
+#                 EVERY stage for EVERY platform as a separate registry artefact. On a
+#                 two-arch build of an image carrying torch, a 130 MB GeoIP database and
+#                 baked model weights, that cache is comfortably LARGER than the image it
+#                 accelerates — so the registry held more bytes for the cache than for the
+#                 thing being shipped, on every release.
+#
+#                 What it bought was a faster build on a COLD cache, i.e. a fresh CI
+#                 runner. Releases here run from a developer laptop, where buildx already
+#                 keeps a local cache between builds and the registry round-trip is pure
+#                 overhead — uploaded after every build, downloaded before the next.
+#
+#                 If a CI runner is added later, put the flags in `release-ci` only, where
+#                 the cold-cache assumption holds. GitHub Actions also offers
+#                 `type=gha`, which is scoped to the workflow and costs the container
+#                 registry nothing.
+#
+# **Deleting the tags in the registry is a separate, manual step.** Removing the flags
+# stops new cache artefacts being written; it does not reclaim what earlier releases
+# already pushed. Delete the `buildcache` tag on each repository by hand — see
+# `make prune-remote-help`.
 #
 # `latest` used to be pushed alongside it, and it cost real money and real clarity:
 #
@@ -482,7 +507,6 @@ buildx: ## Create/select the multi-arch builder (idempotent)
 image-backend: buildx ## Build the backend image for all platforms (cache only)
 	docker buildx build --platform $(PLATFORMS) \
 	  -t $(BACKEND_IMAGE):$(TAG) \
-	  --cache-from type=registry,ref=$(BACKEND_IMAGE):buildcache \
 	  ./backend
 
 .PHONY: image-frontend
@@ -490,7 +514,6 @@ image-frontend: buildx ## Build the frontend image for all platforms (cache only
 	docker buildx build --platform $(PLATFORMS) \
 	  --build-arg NEXT_PUBLIC_SITE_URL=$${NEXT_PUBLIC_SITE_URL:-http://localhost:3000} \
 	  -t $(FRONTEND_IMAGE):$(TAG) \
-	  --cache-from type=registry,ref=$(FRONTEND_IMAGE):buildcache \
 	  ./frontend
 
 .PHONY: images
@@ -608,14 +631,10 @@ release-both: ## Release SHELTER-API then SHELTER-UI, prompting for each
 release-ci: check geoip-verify buildx ## Non-interactive release for CI (no prompts)
 	docker buildx build --platform $(PLATFORMS) --push \
 	  -t $(BACKEND_IMAGE):$(TAG) \
-	  --cache-to type=registry,ref=$(BACKEND_IMAGE):buildcache,mode=max \
-	  --cache-from type=registry,ref=$(BACKEND_IMAGE):buildcache \
 	  ./backend
 	docker buildx build --platform $(PLATFORMS) --push \
 	  --build-arg NEXT_PUBLIC_SITE_URL=$${NEXT_PUBLIC_SITE_URL:-http://localhost:3000} \
 	  -t $(FRONTEND_IMAGE):$(TAG) \
-	  --cache-to type=registry,ref=$(FRONTEND_IMAGE):buildcache,mode=max \
-	  --cache-from type=registry,ref=$(FRONTEND_IMAGE):buildcache \
 	  ./frontend
 	@echo
 	@echo "Pushed $(TAG) for $(PLATFORMS):"
@@ -627,8 +646,6 @@ release-ci: check geoip-verify buildx ## Non-interactive release for CI (no prom
 release-backend: check buildx ## Test, then build+push the backend as multi-arch
 	docker buildx build --platform $(PLATFORMS) --push \
 	  -t $(BACKEND_IMAGE):$(TAG) \
-	  --cache-to type=registry,ref=$(BACKEND_IMAGE):buildcache,mode=max \
-	  --cache-from type=registry,ref=$(BACKEND_IMAGE):buildcache \
 	  ./backend
 
 # NOTE: `release-api` used to be an alias for `release-backend` here.

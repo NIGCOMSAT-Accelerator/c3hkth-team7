@@ -1,7 +1,12 @@
 "use server";
 
 import { api } from "@/lib/api";
-import type { AoiPreview, PlaceResult, ResolvedArea } from "@/lib/types";
+import type {
+  AoiPreview,
+  PlaceResult,
+  PlaceSuggestion,
+  ResolvedArea,
+} from "@/lib/types";
 
 /**
  * Server Actions for the area picker.
@@ -32,6 +37,34 @@ export async function searchPlaces(query: string): Promise<PlaceResult[]> {
     return result.results;
   } catch {
     return [];
+  }
+}
+
+/**
+ * Prefix suggestions while the user is still typing.
+ *
+ * ## Why this is a second function and not a flag on `searchPlaces`
+ *
+ * Different engine, different contract. `searchPlaces` is Nominatim — full-text, one request per
+ * second upstream, and it resolves the prefix "Argun" poorly because that is not a name. This is a
+ * self-hosted Photon prefix index, which is what makes a request per keystroke possible at all.
+ *
+ * **`available` is returned rather than folded into an empty array**, and that distinction is the
+ * whole reason this returns an object. Photon is optional infrastructure: when it is not deployed
+ * the honest UI behaviour is to keep the debounced full search and say nothing, whereas showing
+ * "no matches" for a query that would have matched is a lie the user cannot diagnose.
+ */
+export async function suggestPlaces(
+  query: string,
+): Promise<{ results: PlaceSuggestion[]; available: boolean }> {
+  if (query.trim().length < 2) return { results: [], available: true };
+  try {
+    const result = await api.suggestPlaces(query);
+    return { results: result.results, available: result.available };
+  } catch {
+    // A failure here is indistinguishable from "not deployed" from the UI's point of view, and
+    // both want the same fallback, so it reports unavailable rather than empty.
+    return { results: [], available: false };
   }
 }
 
@@ -73,7 +106,7 @@ export async function previewRing(ring: number[][]): Promise<AoiPreview | null> 
   }
 }
 
-export type { AoiPreview, PlaceResult, ResolvedArea };
+export type { AoiPreview, PlaceResult, PlaceSuggestion, ResolvedArea };
 
 /**
  * State → LGA → map position, for when a place name finds nothing.

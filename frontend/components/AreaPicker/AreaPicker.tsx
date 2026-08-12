@@ -10,9 +10,10 @@ import {
   previewRing,
   resolveArea,
   searchPlaces,
+  suggestPlaces,
   type ResolvedArea,
 } from "@/app/subscribe/area-actions";
-import type { PlaceResult } from "@/lib/types";
+import type { PlaceResult, PlaceSuggestion } from "@/lib/types";
 
 import MapCanvas from "./MapCanvas";
 
@@ -98,6 +99,38 @@ export default function AreaPicker({
    * nothing" must offer the way out.
    */
   const [searchedInVain, setSearchedInVain] = useState(false);
+
+  /**
+   * Prefix suggestions, and whether the suggester exists at all.
+   *
+   * `suggestAvailable` starts **true** so nothing flickers before the first response, and is only
+   * ever set false by an answer. It gates the dropdown rather than the input: with no Photon
+   * instance the field behaves exactly as it did before — debounced full search — and says nothing
+   * about a feature the user never saw.
+   */
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [suggestAvailable, setSuggestAvailable] = useState(true);
+
+  /**
+   * The chosen place's own outline, plus what we can measure of it.
+   *
+   * ## Why this is shown rather than just used
+   *
+   * A judge asked for AOI activation down to the exact address or building. The location can be
+   * that precise; the *measurement* cannot — a real building footprint is ~0.15 ha against a 0.5 ha
+   * floor, roughly 14 Sentinel pixels, below which a flooded-fraction is edge noise.
+   *
+   * Drawing the resolved outline is what makes that honest instead of either faking precision or
+   * refusing a correct address. The user sees their own compound on the map — unambiguous proof we
+   * found the right place — beside a sentence stating the area actually monitored. The rectangle
+   * this replaces proved nothing: it looked identical whether we had found their market or
+   * something a kilometre away sharing its name.
+   */
+  const [outline, setOutline] = useState<{
+    ring: number[][];
+    note: string;
+    enlarged: boolean;
+  } | null>(null);
 
   // ---- the administrative fallback (state -> LGA) ------------------------- //
   //
@@ -241,6 +274,29 @@ export default function AreaPicker({
     }, 500);
     return () => window.clearTimeout(timer);
   }, [query, mode]);
+
+  // ---- 2a. type-ahead, while they are still typing ------------------------ //
+  //
+  // **Runs alongside the 500 ms full search rather than replacing it**, and the two debounces are
+  // deliberately different numbers for different upstreams. Nominatim's policy is one request per
+  // second, so 500 ms is already the floor there. Photon is our own prefix index answering in
+  // ~10 ms, so 150 ms is affordable and is roughly the gap between keystrokes for a fast typist —
+  // suggestions arrive while they are still going.
+  //
+  // Suppressed once a result is chosen (`centre` set and query rewritten) so the dropdown does not
+  // reopen over the confirmation the user just produced.
+  useEffect(() => {
+    if (mode !== "search" || !suggestAvailable || query.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const { results: found, available } = await suggestPlaces(query);
+      setSuggestAvailable(available);
+      setSuggestions(available ? found : []);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [query, mode, suggestAvailable]);
 
   // ---- 2b. the state list, loaded once the fallback is opened ------------- //
   //
@@ -425,6 +481,42 @@ export default function AreaPicker({
             // `search` so mobile keyboards show a search key rather than a newline.
             type="search"
           />
+          {/*
+            Type-ahead. Rendered ABOVE the full-search results and hidden the moment those arrive,
+            so the two lists never stack — a suggestion and a result for the same place would read
+            as two different places.
+
+            Each row is `label` in strong plus `detail` in muted text rather than one combined
+            string: Nigeria has a Kajola in several states, and one line makes them look identical
+            at exactly the moment someone is choosing which field to monitor.
+
+            Selecting a suggestion does NOT resolve an area. It fills the box and runs the full
+            search, because the outline and the administrative hierarchy come from Nominatim — a
+            partially typed string must never become a monitored plot.
+          */}
+          {suggestions.length > 0 && results.length === 0 && (
+            <ul className="picker__results" aria-label="Suggestions">
+              {suggestions.map((sug, i) => (
+                <li key={`${sug.lat}-${sug.lon}-${i}`}>
+                  <button
+                    type="button"
+                    className="picker__result"
+                    onClick={() => {
+                      setSuggestions([]);
+                      // Setting the query re-triggers the 500 ms full search, which is what
+                      // produces the outline. Deliberately not `setCentre` here: moving the map to
+                      // a suggestion the user has not confirmed would look like a decision.
+                      setQuery(sug.label);
+                    }}
+                  >
+                    <strong>{sug.label}</strong>
+                    {sug.detail && <span className="picker__result-detail"> {sug.detail}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
           {searching && <p className="authform__hint">Searching…</p>}
           {results.length > 0 && (
             <ul className="picker__results">
@@ -436,7 +528,20 @@ export default function AreaPicker({
                     onClick={() => {
                       setCentre({ lat: r.lat, lon: r.lon });
                       setResults([]);
+                      setSuggestions([]);
                       setQuery(r.label.split(",")[0]);
+                      // Keep the outline only when there is one AND we can say something true
+                      // about monitoring it. `monitoring` is null for a street or a village node,
+                      // and a ring without a verdict would be a shape with no explanation.
+                      setOutline(
+                        r.ring && r.monitoring
+                          ? {
+                              ring: r.ring,
+                              note: r.monitoring.note,
+                              enlarged: r.monitoring.enlarged,
+                            }
+                          : null,
+                      );
                     }}
                   >
                     {r.label}
@@ -457,6 +562,28 @@ export default function AreaPicker({
             This is the state that used to render nothing at all, which is how a subscriber fell
             through to browser geolocation and registered a Nigerian farm in England.
           */}
+          {/*
+            **The answer to "can you monitor my exact building?"**
+
+            `note` is rendered verbatim and never recomposed here. The backend already says it
+            correctly, and the wording is the point: a building resolves to ~0.15 ha against a
+            0.5 ha measurement floor, so the honest sentence is "we located it exactly, and we
+            monitor the half-hectare around it". Composing our own from `outline_is_monitorable`
+            would turn a precise answer into "too small", which reads as a refusal of an address
+            that was right.
+
+            `enlarged` only picks the icon and tone — never the words.
+          */}
+          {outline && (
+            <p
+              className={
+                outline.enlarged ? "picker__outline picker__outline--wide" : "picker__outline"
+              }
+            >
+              <span aria-hidden="true">{outline.enlarged ? "◎" : "✓"}</span> {outline.note}
+            </p>
+          )}
+
           {searchedInVain && !searching && (
             <div className="picker__fallback">
               <p className="authform__hint">
@@ -614,7 +741,23 @@ export default function AreaPicker({
         }}
         centre={centre}
         bbox={mode !== "draw" ? resolved?.area.bbox ?? null : null}
-        ring={mode === "draw" ? ring : null}
+        /*
+          Two sources for one prop, and the precedence matters.
+
+          In draw mode this is the outline being tapped out. In search mode it is the **resolved
+          place's own footprint** — the market's perimeter, the compound's walls — which is the
+          confirmation the whole change exists to provide. They cannot both apply: `mode` is
+          exclusive, so there is no ambiguity to resolve.
+
+          `[number, number][]` on the prop but `number[][]` on the wire, because JSON has no tuples.
+          The cast is safe: `_outline` in `eo/places.py` builds every ring from `[float(x), float(y)]`
+          pairs, so a short entry cannot reach here.
+        */
+        ring={
+          mode === "draw"
+            ? ring
+            : (outline?.ring as [number, number][] | undefined) ?? null
+        }
         drawing={mode === "draw"}
         onMapTap={(lat, lon) => {
           if (mode === "draw") {

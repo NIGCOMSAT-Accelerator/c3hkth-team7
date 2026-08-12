@@ -33,6 +33,7 @@ import type {
   PasswordChangeCodeSent,
   PendingInvitation,
   PlaceResult,
+  PlaceSuggestion,
   ResolvedArea,
   RiskAssessment,
   RoleOption,
@@ -77,36 +78,40 @@ const API_KEY = process.env.SHELTER_API_KEY;
  * backend at all is a legitimate state — the pages are built to SSR against a dead API — and
  * crashing the module would break that.
  */
-// Gated on a HOSTED build, not merely on `NODE_ENV === "production"`.
+// ## No environment gate at all, and that is deliberate
 //
-// `npm run build` locally sets NODE_ENV=production, where falling back to localhost is
-// exactly right — so warning there was a false positive that fired three times on every
-// local build. A warning that cries wolf during normal development is one an operator
-// learns to scroll past, which costs it the one moment it matters.
+// This was `NETLIFY || VERCEL || CI`, which meant a **self-hosted container** — how this actually
+// deploys — matched nothing and neither warning ever fired. A VPS with no `SHELTER_API_KEY` then
+// 401'd every platform read, `/portal/areas` said "Areas temporarily unavailable" with a healthy
+// API behind it, and there was **nothing in any log** to say why.
 //
-// `NETLIFY` and `VERCEL` are set by those platforms; `CI` covers a pipeline build. Any of
-// them means "this will not be able to reach your laptop".
-const IS_HOSTED = Boolean(
-  process.env.NETLIFY || process.env.VERCEL || process.env.CI,
-);
+// Adding `NODE_ENV === "production"` did not work, and the reason is worth recording: Next.js
+// INLINES `process.env.NODE_ENV` at build time, so the term became a literal and the whole
+// expression was constant-folded. Verified by reading the emitted chunk — the compiled guard was
+// still `(NETLIFY||VERCEL||CI)` with the NODE_ENV term gone entirely.
+//
+// So the gate is removed. Each check already fires only when its value is **absent**, which is the
+// condition actually worth reporting — a developer running `npm run dev` against a local backend
+// with a populated `.env.local` sees nothing, and one running with no backend at all sees a line
+// that is true and useful rather than noise.
+if (!process.env.SHELTER_API_URL) {
+  console.error(
+    "[shelter] SHELTER_API_URL is not set. Falling back to http://localhost:8000, which " +
+      "inside a container is that container — every API call will fail while pages still " +
+      "render (safeApi degrades them). Note the exact name: API_BASE_URL and API_URL are " +
+      "NOT read.",
+  );
+}
 
-if (IS_HOSTED) {
-  if (!process.env.SHELTER_API_URL) {
-    console.error(
-      "[shelter] SHELTER_API_URL is not set. Falling back to http://localhost:8000, " +
-        "which on a hosted renderer is this container — every API call will fail while " +
-        "pages still render empty. Set it in your host's environment. Note the exact " +
-        "name: API_BASE_URL and API_URL are NOT read.",
-    );
-  }
-  if (!API_KEY) {
-    console.error(
-      "[shelter] SHELTER_API_KEY is not set. Gated endpoints will 401 — including " +
-        "/places/*, which the area picker needs, so subscribers cannot choose an area to " +
-        "monitor. Provision one with: make iam-service-account NAME=shelter-portal " +
-        "EMAIL=ops@example.com",
-    );
-  }
+if (!API_KEY) {
+  console.error(
+    "[shelter] SHELTER_API_KEY is not set. Every platform read will 401 while sign-in keeps " +
+      "working — that uses the session cookie — so the SYMPTOM is: /portal/areas says 'Areas " +
+      "temporarily unavailable', the alert feed is empty, and the area picker cannot resolve a " +
+      "place, all with a healthy API. Provision one with: make iam-service-account " +
+      "NAME=shelter-portal EMAIL=ops@example.com — it must be a scoped 'shltky…' key, not the " +
+      "legacy API_KEY, which is refused once IAM is configured.",
+  );
 }
 
 export class ApiError extends Error {
@@ -551,6 +556,32 @@ export const api = {
       `/places/search?q=${encodeURIComponent(q)}&country=${country}&limit=6`,
       { revalidate: 3600 },
     ),
+
+  /**
+   * Type-ahead suggestions for a partially typed place.
+   *
+   * Distinct from `searchPlaces`, and the split is not arbitrary. That one is a **full-text**
+   * geocoder (Nominatim): it resolves "Argungu, Kebbi" well, resolves the prefix "Argun" poorly,
+   * and its upstream policy is one request per second — so it cannot serve a keystroke. This one
+   * queries a self-hosted Photon prefix index built for exactly that.
+   *
+   * **Check `available` before showing "no matches".** It is false when no Photon instance is
+   * deployed, and an empty list means the same thing either way — telling someone their query
+   * found nothing because a container is missing is a lie. When false, fall back to the debounced
+   * `searchPlaces`.
+   *
+   * `revalidate: 300` rather than an hour: suggestions are cheap to recompute and a shorter window
+   * keeps a freshly imported OSM index visible. Next's cache also collapses the duplicate requests
+   * that typing the same prefix twice produces.
+   */
+  suggestPlaces: (q: string) =>
+    request<{
+      results: PlaceSuggestion[];
+      available: boolean;
+      attribution: string;
+    }>(`/places/suggest?q=${encodeURIComponent(q)}&limit=8`, {
+      revalidate: 300,
+    }),
 
   /**
    * State → LGA → extent, for when a place name finds nothing.

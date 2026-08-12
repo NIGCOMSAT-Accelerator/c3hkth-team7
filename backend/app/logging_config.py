@@ -83,3 +83,35 @@ def configure_logging() -> None:
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
+
+
+def describe(exc: BaseException) -> str:
+    """A never-empty description of an exception, for `extra={"error": ...}`.
+
+    ## Why `str(exc)` is not enough
+
+    Several exception types that matter here carry **no message at all**, so
+    `str(exc)` is the empty string and the log line reads:
+
+        {"msg": "worldpop lookup failed", "error": ""}
+
+    That is worse than no field: it looks like the error was captured when in fact the
+    one useful fact — *what kind* of failure — was discarded. Observed in production on
+    `worker-1`, where an empty `error` hid an `httpx.ReadTimeout`; the cause took a live
+    reproduction to establish, and the class name alone would have said it immediately.
+
+    `httpx` is the main offender (`ReadTimeout`, `ConnectTimeout`, `PoolTimeout` all
+    stringify to `""`), and it is the library every adapter in `app/eo/` uses.
+
+    So the type is always included, and the message only when there is one:
+
+        ReadTimeout
+        JSONDecodeError: Extra data: line 7 column 2 (char 152)
+
+    Deliberately not a traceback: these are *expected* upstream failures on optional
+    sources, logged at WARNING and degraded from. A stack trace per failed poll would
+    bury the run it belongs to.
+    """
+    message = str(exc).strip()
+    name = type(exc).__name__
+    return f"{name}: {message}" if message else name

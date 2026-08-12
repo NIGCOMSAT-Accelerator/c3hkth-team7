@@ -33,6 +33,38 @@ import type { Account, MyAccess } from "./types";
 const COOKIE = "shelter_session";
 
 /**
+ * The cookie's name and options, exported so a **Route Handler** can write the same cookie.
+ *
+ * ## Why this is shared rather than duplicated
+ *
+ * `setSession` below cannot be used from a Route Handler: it goes through `cookies()`, which is the
+ * request-scoped store, whereas a handler must set the cookie on the `Response` it returns
+ * (`response.cookies.set`). Two different APIs, same cookie.
+ *
+ * `app/auth/verify/route.ts` is the caller, and it exists because a page render **cannot** write a
+ * cookie at all — that was the magic-link bug. Given two write sites, the options have to have one
+ * definition: a handler that set `sameSite: "strict"` or forgot `httpOnly` would produce a session
+ * that behaves subtly differently from every other sign-in path, and nothing would fail loudly.
+ *
+ * `sameSite: "lax"` is load-bearing here specifically. A magic link IS a cross-site navigation —
+ * the user clicks from their mail client — and `strict` would withhold the cookie on exactly that
+ * request, landing them signed out having just proven who they are.
+ */
+export const SESSION_COOKIE = COOKIE;
+
+export function sessionCookieOptions(expiresIn?: number) {
+  return {
+    httpOnly: true,
+    // Secure everywhere except local http development, where the browser would silently drop the
+    // cookie and sign-in would appear to do nothing.
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: expiresIn ?? MAX_AGE,
+  };
+}
+
+/**
  * Cookie lifetime, in seconds. Matched to the backend's `IAM_SESSION_MINUTES` (12h).
  *
  * Deliberately not longer than the token: a cookie outliving its JWT means the user
@@ -43,15 +75,7 @@ const MAX_AGE = 12 * 60 * 60;
 
 export async function setSession(token: string, expiresIn?: number): Promise<void> {
   const store = await cookies();
-  store.set(COOKIE, token, {
-    httpOnly: true,
-    // Secure everywhere except local http development, where the browser would
-    // silently drop it and sign-in would appear to do nothing.
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: expiresIn ?? MAX_AGE,
-  });
+  store.set(COOKIE, token, sessionCookieOptions(expiresIn));
 }
 
 export async function clearSession(): Promise<void> {

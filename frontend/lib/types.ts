@@ -769,6 +769,65 @@ export interface PlaceResult {
   admin1: string | null;
   admin2: string | null;
   kind: string | null;
+
+  /**
+   * The feature's real outline as a closed `[[lon, lat], …]` ring — the market's perimeter, the
+   * compound's walls, the LGA's boundary.
+   *
+   * **Null is normal, not an error.** Streets are lines and most Nigerian villages are single
+   * nodes, so neither has an outline; `bbox` still frames them. Draw this when present: a
+   * rectangle over someone's district proves nothing, whereas their own compound outlined on the
+   * map is unambiguous confirmation that we found the right place.
+   *
+   * For display only. Submitting it as an AOI is legitimate only when
+   * `monitoring.outline_is_monitorable` — a building footprint is below the measurement floor and
+   * a state boundary is above the ceiling, and the write path refuses both.
+   */
+  ring: number[][] | null;
+  /** True area of `ring` in hectares. Null when there is no ring. */
+  ring_hectares: number | null;
+  /** What the pipeline can actually do with `ring`. Present whenever a ring is. */
+  monitoring: MonitoringNote | null;
+}
+
+/**
+ * Whether a resolved outline can be monitored as-is, in words fit to display verbatim.
+ *
+ * Mirrors `MonitoringNote` in `app/api/routes/places.py`. **Do not compose your own sentence from
+ * these fields** — `note` already says it correctly, and the reason matters: a building resolves to
+ * a fraction of a hectare, well under the measurement floor, so the honest statement is "we located
+ * it exactly, and we monitor the half-hectare around it". A frontend that rendered
+ * `outline_is_monitorable: false` as "too small" would turn a precise answer into a refusal.
+ *
+ * No figures are repeated here on purpose. `tests/test_tracks.py` greps this file for numeric
+ * cut-offs, because a TypeScript copy of a threshold is how the email and the portal come to
+ * describe one plot differently — and it caught this comment, which is the guard working.
+ */
+export interface MonitoringNote {
+  outline_is_monitorable: boolean;
+  monitored_hectares: number;
+  /** Render verbatim. */
+  note: string;
+  /** True when the monitored area is larger than what they outlined — a building, mostly. */
+  enlarged: boolean;
+}
+
+/**
+ * One type-ahead row from `GET /places/suggest`.
+ *
+ * Carries **no geometry**, deliberately: selecting one is expected to call `searchPlaces` with the
+ * label, which is where the outline comes from. A partially typed string must not be able to
+ * become a monitored area.
+ */
+export interface PlaceSuggestion {
+  /** The name the eye lands on — "Argungu". */
+  label: string;
+  /** The context that disambiguates it — "Kebbi, Nigeria". Nigeria has several Kajolas. */
+  detail: string;
+  lat: number;
+  lon: number;
+  kind: string | null;
+  country: string | null;
 }
 
 /** What `POST /places/preview` reports about a candidate area. */

@@ -234,26 +234,22 @@ export async function requestMagicLink(
  * clicking — there is nothing to submit. Redirects to the `next` path the backend
  * returns, which it has already sanitised against open redirects.
  */
-export async function redeemMagicLink(token: string): Promise<AuthState> {
-  try {
-    const session = await api.redeemMagicLink(token);
-    await setSession(session.access_token, session.expires_in);
-    // `session.next` is the backend-sanitised path from the link. It is still subject to
-    // the verification check: a magic link proves the person controls the mailbox for
-    // *sign-in*, but the account's own address may be a different, unconfirmed one.
-    redirect(destinationFor(session.account, session.next || "/dashboard"));
-  } catch (error) {
-    // `redirect` throws a control-flow signal that must not be caught as an error.
-    if (error instanceof Error && error.message === "NEXT_REDIRECT") throw error;
-    return {
-      ok: false,
-      message: describe(
-        error,
-        "That sign-in link is invalid, already used, or has expired. Request a new one.",
-      ),
-    };
-  }
-}
+// `redeemMagicLink` USED TO LIVE HERE, and its removal is the fix for a production bug.
+//
+// It called `setSession()`, which calls `cookies().set()`. That is legal in a Server Action — but
+// this one was invoked from `app/auth/verify/page.tsx` **during a render**, where `cookies()` is a
+// sealed proxy whose `set` throws unconditionally. So every successful sign-in raised
+// `ReadonlyRequestCookiesError`, the `catch` here swallowed it, and `describe()` reported the
+// generic *"That sign-in link is invalid, already used, or has expired."* — for a token the backend
+// had just accepted and, being single-use, already deleted. Retrying could not work.
+//
+// The `"use server"` marker at the top of this file makes every export a Server Action, which is
+// what made the mistake invisible: the function genuinely was one, it was just called from the one
+// context that cannot write a cookie.
+//
+// It now lives in `app/auth/verify/route.ts`, a Route Handler, which owns its `Response` and can
+// therefore set `Set-Cookie`. Deliberately NOT left here as an unused export: a helper that looks
+// available and breaks in the caller a reader is most likely to try is worse than no helper.
 
 // --------------------------------------------------------------------------- //
 // Password reset
@@ -470,21 +466,9 @@ export async function resendVerification(): Promise<AuthState> {
  * "that link expired, here is how to get another" — a bare redirect to the dashboard on
  * failure would leave someone bounced to /auth/pending with no idea why.
  */
-export async function redeemVerification(token: string): Promise<AuthState> {
-  try {
-    await api.verifyEmail(token);
-    return {
-      ok: true,
-      message: "Your email address is confirmed.",
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      message: describe(
-        error,
-        "That confirmation link is invalid, already used, or has expired. " +
-          "Sign in and request a new one.",
-      ),
-    };
-  }
-}
+// `redeemVerification` was removed alongside `redeemMagicLink`, same reason.
+//
+// It did not write a cookie itself, so it was not broken — but its only caller was the page render
+// that was, and leaving one half of a pair here would invite the next reader to reach for the same
+// shape. Email confirmation now happens in `app/auth/verify/route.ts` beside the sign-in path, so
+// both token kinds are handled in one place with one set of rules about which is which.

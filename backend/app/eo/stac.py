@@ -19,7 +19,7 @@ import httpx
 from app.config import settings
 from app.eo import auth
 from app.eo.catalogs import AuthMode, Catalog, Product, chain_for
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import AssetRef, BBox, SceneRef
 
 log = get_logger(__name__)
@@ -195,7 +195,7 @@ async def search(
                     extra={
                         "catalog": catalog.name,
                         "collection": collection,
-                        "error": str(exc),
+                        "error": describe(exc),
                     },
                 )
                 continue

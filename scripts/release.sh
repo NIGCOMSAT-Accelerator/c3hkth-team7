@@ -387,12 +387,27 @@ say "   ${DIM}Builder: ${BUILDER_NAME}${RESET}"
 #
 # A Dokploy VPS is usually amd64, so check `make manifest` matches your host before relying on a
 # single-arch push — an image built arm64-only will not run there.
+#
+# NO REGISTRY BUILD CACHE, and this is the same argument as `latest` above.
+#
+# `--cache-to type=registry,ref=…:buildcache,mode=max` pushes a SECOND artefact per release —
+# every intermediate layer of every stage, for every platform. With `mode=max` on a two-arch
+# build of an image carrying torch, a 130 MB GeoIP database and baked weights, that cache is
+# comfortably larger than the image itself. So the registry stored more bytes for the cache than
+# for the thing being shipped, on every single release.
+#
+# What it buys is a faster build on a machine with a COLD local cache — a fresh CI runner. This
+# project releases from a developer laptop (`make release-both`), where buildx already keeps a
+# local cache between builds and the registry round-trip is pure overhead: it has to be uploaded
+# after every build and downloaded before the next one.
+#
+# If a CI runner is ever added, put the cache flags in `release-ci` where the cold-cache
+# assumption actually holds, rather than here. GitHub Actions also offers `type=gha`, which is
+# scoped to the workflow and costs the container registry nothing.
 docker buildx build \
     --platform "${PLATFORMS:-linux/amd64,linux/arm64}" \
     --push \
     -t "${IMAGE}:${TAG}" \
-    --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=max" \
-    --cache-from "type=registry,ref=${IMAGE}:buildcache" \
     "$CONTEXT"
 
 # ---------------------------------------------------------------------------- #

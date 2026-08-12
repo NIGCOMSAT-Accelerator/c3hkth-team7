@@ -92,7 +92,47 @@ def _device() -> torch.device:
         _resolved_device = torch.device("cpu")
 
     log.info("torch device resolved", extra={"device": str(_resolved_device)})
+    if _resolved_device.type == "cpu":
+        _quiet_nnpack()
     return _resolved_device
+
+
+def _quiet_nnpack() -> None:
+    """Stop NNPACK from re-announcing that it cannot run on this CPU.
+
+    ## What the warning is
+
+    `[W812 12:31:28.310] NNPACK.cpp:61 Could not initialize NNPACK! Reason: Unsupported hardware.`
+    on `worker-analyst-1`. NNPACK is one of several convolution backends torch may pick on CPU;
+    it needs AVX2 (x86) or specific NEON support, and a VPS whose CPU flags are masked by the
+    hypervisor does not qualify. torch then falls back to its own kernels — which is what makes
+    this **benign**, and why it is only a `W`.
+
+    Verified in the built image rather than assumed: the same convolution with NNPACK attempted
+    and with `set_flags(False)` returns **bitwise identical** output (`torch.equal` True, max abs
+    diff 0.0). So this suppresses a message, never a computation. The flood and crop-stress
+    predictions, and therefore `CONFIDENCE_TRAINED`, are unchanged.
+
+    ## Why it is worth silencing at all
+
+    It is emitted from C++ on every worker start, not through `logging`, so it lands in the
+    runtime console as an unstructured line among structured JSON — indistinguishable at a glance
+    from `worldpop lookup failed`, which is a real degradation. An operator reading these logs to
+    decide whether a scan is trustworthy should not have to learn which warnings to ignore.
+
+    Guarded three ways because this is cosmetic and must never be the thing that breaks
+    inference: the namespace is absent on torch < 2.5 (2.2 on the training Mac has no
+    `backends.nnpack`), `set_flags` is not part of the documented API surface, and CPU-only —
+    on CUDA or MPS the backend is irrelevant and touching global flags would be gratuitous.
+    """
+    nnpack = getattr(torch.backends, "nnpack", None)
+    setter = getattr(nnpack, "set_flags", None)
+    if setter is None:
+        return
+    try:
+        setter(False)
+    except Exception:  # noqa: BLE001 — a cosmetic tweak must never break inference
+        log.debug("could not disable the NNPACK backend; its warning will persist")
 
 
 def _load(name: str, factory, weights_path: str) -> torch.nn.Module | None:

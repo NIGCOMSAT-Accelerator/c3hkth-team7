@@ -346,9 +346,18 @@ class Settings(BaseSettings):
     soilgrids_heavy_clay_threshold: float = 350.0
 
     # ---------------- Health reference ----------------
+    # An operator switch for the one source whose upstream is currently down. Every EO adapter
+    # degrades honestly on failure, but MAP degrades on a ~10s gateway timeout on every scan,
+    # per AOI — a warning that cannot be acted on and latency that buys nothing. False skips
+    # the request entirely and returns the same unavailable baseline the failure produces.
+    malaria_atlas_enabled: bool = True
     malaria_atlas_url: str = "https://data.malariaatlas.org/geoserver"
     malaria_atlas_workspace: str = "Malaria"
-    malaria_atlas_layer: str = "Global_Pf_Parasite_Rate"
+    # MAP version-prefixes its layer names and retires the old ones. Read out of the data
+    # portal's own bundle (2026-08-12): `PF_PR = "202508_Global_Pf_Parasite_Rate"`. The
+    # unprefixed `Global_Pf_Parasite_Rate` this used to default to no longer exists, and a
+    # WMS request for a missing layer is a ServiceException, not an empty answer.
+    malaria_atlas_layer: str = "202508_Global_Pf_Parasite_Rate"
     # Baseline PfPR below which a flood is not treated as a malaria trigger:
     # standing water raises transmission where the parasite already circulates.
     malaria_endemic_threshold: float = 0.05
@@ -543,6 +552,62 @@ class Settings(BaseSettings):
     #: Long — place names do not move, and this is what keeps a busy deployment inside the
     #: usage policy.
     nominatim_cache_ttl_seconds: int = 604_800
+
+    # ---- Type-ahead (Photon) ----
+    #
+    # Photon is the OSM-native geocoder built for prefix matching. Nominatim is a *full-text*
+    # geocoder: it answers "Argungu" well and "Argun" poorly, which is the wrong shape for
+    # search-as-you-type, and its 1 req/sec policy forbids a request per keystroke anyway.
+    #
+    # SELF-HOSTED, for the same reason SearXNG and MinIO are: every query is a partial address
+    # typed by someone registering their own farm, and the public instance measured **23 s** for
+    # a single query — unusable behind a keystroke. Empty disables the feature and the UI falls
+    # back to the existing debounced Nominatim search, which is why this can ship dark.
+    photon_url: str = ""
+    #: Very short. This is on the keystroke path: a slow suggestion is worse than none, because
+    #: the user has already typed past it. Photon answers a local index in ~10 ms, so anything
+    #: over this means the service is unhealthy and the caller should degrade immediately.
+    photon_timeout_seconds: float = 1.5
+    #: Suggestions are cached too — "Kan" is a prefix of every Kano query on the platform.
+    #: Shorter than Nominatim's week because a prefix index is rebuilt on each OSM import.
+    photon_cache_ttl_seconds: int = 86_400
+    #: Max suggestions returned per keystroke. Ten is already more than a phone can show.
+    photon_max_results: int = 8
+    #: Suggestion requests per credential per hour. 0 disables the ceiling.
+    #:
+    #: Deliberately high: this is a keystroke endpoint, and a subscriber outlining three plots
+    #: might legitimately type a few hundred characters. The limit exists to stop a valid key
+    #: being used to walk the alphabet and harvest Nigeria's address graph — a licence and
+    #: reputational problem even though the underlying OSM data is public — not to ration typing.
+    #:
+    #: Keyed on `KeyHolder.label`, so the portal's whole subscriber base shares one bucket while
+    #: each aggregator gets its own. See the note at the call site.
+    place_suggest_rate_limit_per_hour: int = 2000
+
+    # ---- Vector / GeoParquet (Overture Maps, keyless) ----
+    #
+    # Read IN PLACE over HTTP range reads via DuckDB + httpfs. Deliberately not copied into our
+    # own object store: that would add a multi-gigabyte sync job and a staleness question against
+    # a monthly release, to speed up queries that already finish in seconds.
+    #
+    # Empty disables every vector read. DuckDB is an OPTIONAL dependency and `vector.available()`
+    # checks for it, so a deployment without it degrades with one log line.
+    #
+    # MEASURED, and it changed the plan: `theme=addresses` covers 39 countries and NONE in
+    # Africa, so Overture cannot verify a Nigerian address. `theme=places` has 53,865 POIs over
+    # a Lagos bbox and is genuinely useful. See `eo/vector.py`.
+    overture_release_url: str = (
+        "s3://overturemaps-us-west-2/release/2026-07-22.0"
+    )
+    #: The bucket's region. Wrong value = every read fails with a redirect error.
+    overture_s3_region: str = "us-west-2"
+    #: Per-query ceiling, seconds.
+    #:
+    #: 30 against a measured 12 s for a `places` query over one AOI — headroom for a slower link
+    #: without letting a stalled public bucket extend a scan. A buildings query measured ~110 s
+    #: and is therefore NOT on any request path; see `vector.POI_ONLY_IN_REQUEST_PATH`.
+    overture_query_timeout_seconds: float = 30.0
+
     #: Path to an MMDB city database, used to turn an audit entry's IP into
     #: "Warrington, United Kingdom" in the portal.
     #:

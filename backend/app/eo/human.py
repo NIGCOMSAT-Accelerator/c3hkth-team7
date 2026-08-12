@@ -102,7 +102,17 @@ def describe_area(hectares: float) -> str:
     Football pitches up to a point, then square kilometres — beyond about 100 ha, "141
     pitches" stops being a picture and starts being a number, which defeats the purpose.
     """
-    if hectares < 0.1:
+    # Square metres below half a pitch.
+    #
+    # This boundary was 0.1 ha, and that was too low once building footprints started arriving
+    # here: 0.1473 ha (Kano Central Mosque, measured) and 1.0 ha both rendered as "about the
+    # size of a football pitch" — the first is a **fifth** of one. The whole purpose of this
+    # function is a comparison the user can check against a map, so a description that spans an
+    # order of magnitude is worse than the bare number it replaced.
+    #
+    # Half a pitch is where "a pitch" stops being a fair rounding. Below it, square metres are
+    # both honest and the unit someone picturing a compound or a shop already thinks in.
+    if hectares < HA_PER_PITCH / 2:
         return f"about {hectares * 10_000:,.0f} square metres"
     if hectares <= 100:
         pitches = hectares / HA_PER_PITCH
@@ -200,3 +210,139 @@ def square_for_hectares(lat: float, lon: float, hectares: float) -> tuple[float,
     lat_delta = half_m / 110_574.0
     lon_delta = half_m / (111_320.0 * max(math.cos(math.radians(lat)), 0.01))
     return lon_delta, lat_delta
+
+
+# --------------------------------------------------------------------------- #
+# Monitoring resolution, said honestly
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class MonitoringNote:
+    """Whether a resolved outline can be monitored as-is, in plain language.
+
+    ## Why this exists
+
+    A judge asked for address- and building-level precision when activating an AOI. The
+    measurement floor makes that impossible to honour *literally*, and it is worth being exact
+    about why rather than hand-waving: geocoding "Kano Central Mosque" resolves a real
+    17-vertex footprint of **0.1473 ha**, about **14 Sentinel pixels**, against a
+    `MIN_AOI_HECTARES` floor of 0.5. Below ~50 pixels an "inundated fraction" is dominated by
+    edge effects and geolocation error, so a per-building reading would be a precise-looking
+    number that means nothing — the exact failure this codebase refuses everywhere else.
+
+    The resolution is not to reject the address. It is to **accept the exact location and state
+    the monitoring resolution separately**:
+
+        found       the building, at full precision, drawn on the map
+        monitored   the area we will actually measure, drawn around it
+
+    Same move `SeverityBadge` makes by never using colour alone, and `ScoreDriver` makes by
+    showing per-input attribution: the limitation becomes visible rigour rather than an
+    unexplained refusal. "We found your shop; we watch the half-hectare around it" earns more
+    trust than "area too small".
+    """
+
+    #: True when the outline is large enough to measure directly.
+    outline_is_monitorable: bool
+    #: Hectares actually monitored — the outline's own area when big enough, else the floor.
+    monitored_hectares: float
+    #: One sentence for the user. Never blank.
+    note: str
+    #: True when the monitored area had to be enlarged past what they outlined.
+    enlarged: bool
+
+
+def monitoring_note(
+    outline_hectares: float | None, *, label: str = "that outline"
+) -> MonitoringNote:
+    """How the pipeline will treat a resolved outline, and what to tell the user.
+
+    Three cases, and the middle one is the whole point:
+
+      * **no outline** — a street or a settlement node. Nothing to say about size yet.
+      * **too small** — a building or compound. Keep their exact location, monitor the smallest
+        area that yields a real reading, and say so.
+      * **large enough** — monitored exactly as outlined.
+
+    Deliberately does **not** raise for a small outline. `geometry.check_monitorable` still
+    guards the write path and must: a stored AOI below the floor would produce meaningless
+    fractions forever. This is for the step *before* that, where the honest answer is "here is
+    what we can do" rather than an error.
+    """
+    floor = _min_monitorable_hectares()
+
+    if outline_hectares is None:
+        return MonitoringNote(
+            outline_is_monitorable=False,
+            monitored_hectares=0.0,
+            note=(
+                "We found the place but not an outline for it — most streets and villages have "
+                "no mapped boundary. Drop a pin or draw the area and we will measure it."
+            ),
+            enlarged=False,
+        )
+
+    if outline_hectares < floor:
+        return MonitoringNote(
+            outline_is_monitorable=False,
+            monitored_hectares=floor,
+            note=(
+                f"We located {label} exactly — {describe_area(outline_hectares)}. That is finer "
+                f"than the satellites can measure, so we will monitor the {floor:g} hectares "
+                f"around it ({describe_area(floor)}). The location is precise; the reading "
+                f"covers a slightly wider area."
+            ),
+            enlarged=True,
+        )
+
+    ceiling = _max_monitorable_hectares()
+    if outline_hectares > ceiling:
+        # **The other end of the same problem, and easy to forget.**
+        #
+        # Searching a state or an LGA resolves a genuine boundary — Kano State came back at
+        # 2,035,580 ha and Argungu LGA at 101,270 ha, both real. Without this branch the note
+        # said "we will monitor Argungu exactly as mapped", which the write path then refuses:
+        # one inundated-fraction over a whole LGA cannot locate anything actionable, which is
+        # what `MAX_AOI_HECTARES` encodes.
+        #
+        # An outline this large is a *viewport*, not a footprint — the same distinction
+        # `AdminExtentResponse.is_monitorable_area` already makes for the admin cascade. So the
+        # honest answer is to frame the map here and ask for the actual plot.
+        return MonitoringNote(
+            outline_is_monitorable=False,
+            monitored_hectares=0.0,
+            note=(
+                f"That is {label} as a whole — {describe_area(outline_hectares)}. One risk "
+                f"figure over an area that size cannot say which part is affected, so we watch "
+                f"plots rather than districts. We have framed the map here; outline your own "
+                f"land or drop a pin inside it."
+            ),
+            enlarged=False,
+        )
+
+    return MonitoringNote(
+        outline_is_monitorable=True,
+        monitored_hectares=outline_hectares,
+        note=f"We will monitor {label} exactly as mapped — {describe_area(outline_hectares)}.",
+        enlarged=False,
+    )
+
+
+def _max_monitorable_hectares() -> float:
+    """`geometry.MAX_AOI_HECTARES`, imported lazily. See `_min_monitorable_hectares`."""
+    from app.eo import geometry
+
+    return geometry.MAX_AOI_HECTARES
+
+
+def _min_monitorable_hectares() -> float:
+    """`geometry.MIN_AOI_HECTARES`, imported lazily.
+
+    Lazy so that importing `human` — a pure text module — never pulls in the geometry package.
+    One source for the floor, because a second copy of 0.5 here would drift from the value the
+    write path actually enforces, and the sentence would then promise something refused.
+    """
+    from app.eo import geometry
+
+    return geometry.MIN_AOI_HECTARES

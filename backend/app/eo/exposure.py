@@ -22,17 +22,25 @@ A source that fails leaves its field at zero and its name out of `sources`, so
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 
 from app.config import settings
 from app.eo.geometry import area_hectares, bbox_geojson
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import BBox, ExposureSummary
 
 log = get_logger(__name__)
 
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+
+#: How long to chase a WorldPop async task before giving up.
+#:
+#: 5 x 3s = 15s worst case. Bounded because population MODULATES a risk score and never
+#: triggers a hazard, so it must not hold a scan open — the Analyst is already the slow stage.
+_WORLDPOP_POLL_ATTEMPTS = 5
+_WORLDPOP_POLL_SECONDS = 3.0
 
 # Re-exported so callers can reach the geometry helpers through this module.
 __all__ = ["area_hectares", "bbox_geojson", "exposure_for"]
@@ -135,7 +143,7 @@ async def _worldcover_fractions(bbox: BBox) -> dict[str, float]:
         except CogReadError as exc:
             log.debug(
                 "worldcover tile did not cover the AOI; trying the next",
-                extra={"item": scene.item_id, "error": str(exc)[:90]},
+                extra={"item": scene.item_id, "error": describe(exc)[:90]},
             )
             continue
         if np.isfinite(grid).any():
@@ -199,7 +207,7 @@ async def _dem_lowland_fraction(bbox: BBox) -> float:
             asset.href, bbox, out_size=settings.exposure_tile_size
         )
     except CogReadError as exc:
-        log.warning("dem read failed", extra={"error": str(exc)})
+        log.warning("dem read failed", extra={"error": describe(exc)})
         raise LookupError(str(exc)) from exc
 
     valid = elevation[np.isfinite(elevation)]
@@ -216,7 +224,48 @@ async def _dem_lowland_fraction(bbox: BBox) -> float:
 # --------------------------------------------------------------------------- #
 
 
+def _lenient_json(body: str) -> dict:
+    """Parse the FIRST JSON value in a body and ignore whatever follows.
+
+    ## Why this is needed, verified against the live API
+
+    `api.worldpop.org` emits valid JSON and then appends **PHP warning HTML**:
+
+        {
+            "status": "created", "taskid": "ec98015f-…"
+        }<br />
+        <b>Warning</b>:  Trying to access array offset on value of type bool in
+        <b>/srv/www/api.worldpop.org/html/app/ServicesController.php</b> on line <b>278</b>
+
+    `response.json()` therefore raises `JSONDecodeError: Extra data: line 7 column 2
+    (char 152)` — the exact error seen on `worker-1`. The JSON itself is complete and
+    correct; only the trailing diagnostics break a strict parser.
+
+    `raw_decode` reads one value and reports where it stopped, which is precisely the
+    tolerance needed. Deliberately NOT a regex or a `split("<")`: the response may
+    legitimately contain `<` inside a string, and a decoder that understands JSON
+    grammar cannot be fooled by that.
+    """
+    return json.JSONDecoder().raw_decode(body.lstrip())[0]
+
+
 async def _worldpop_population(bbox: BBox) -> int:
+    """Population inside the footprint, or 0 when WorldPop cannot answer.
+
+    ## The API ignores `runasync=false`, so this follows the task
+
+    Verified live: `/services/stats` returns `{"status": "created", "taskid": …}` whether or
+    not `runasync=false` is sent — there is no synchronous mode. The previous code read
+    `data.total_population` from that first response, which never contains it, so **every
+    lookup returned 0** even when the request succeeded. `_exposure_term` then treated the
+    footprint as unknown, which is the honest reading but not the available one.
+
+    So the task id is polled. Bounded deliberately: the Analyst is the slow stage already and
+    population is a *modulating* input, never a hazard trigger — it must not hold a scan open.
+    On timeout the answer is 0, which `ExposureSummary.sources` reports as WorldPop simply not
+    being in the list. Absent is not zero: `_exposure_term` returns 0 for unknown rather than
+    treating unknown as an empty footprint.
+    """
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             response = await client.get(
@@ -229,10 +278,49 @@ async def _worldpop_population(bbox: BBox) -> int:
                 },
             )
             response.raise_for_status()
-            data = response.json().get("data", {})
-            return int(float(data.get("total_population", 0) or 0))
+            first = _lenient_json(response.text)
+
+            # Answered outright — kept because the API contract may tighten, and this is the
+            # cheap path when it does.
+            direct = (first.get("data") or {}).get("total_population")
+            if direct is not None:
+                return int(float(direct or 0))
+
+            task_id = first.get("taskid")
+            if not task_id:
+                log.warning(
+                    "worldpop returned neither a population nor a task id",
+                    extra={"status": first.get("status")},
+                )
+                return 0
+
+            for _ in range(_WORLDPOP_POLL_ATTEMPTS):
+                await asyncio.sleep(_WORLDPOP_POLL_SECONDS)
+                task = await client.get(
+                    f"{settings.worldpop_api_url.rstrip('/')}/tasks/{task_id}"
+                )
+                task.raise_for_status()
+                payload = _lenient_json(task.text)
+
+                if payload.get("status") == "finished":
+                    data = payload.get("data") or {}
+                    return int(float(data.get("total_population", 0) or 0))
+                if payload.get("error"):
+                    log.warning(
+                        "worldpop task failed",
+                        extra={"error_message": payload.get("error_message")},
+                    )
+                    return 0
+
+            # Not an error — the free tier is genuinely slow, and observed staying "created"
+            # well past this budget. Logged at INFO so it does not read as a fault.
+            log.info(
+                "worldpop task did not finish within the poll budget; population unknown",
+                extra={"task_id": task_id},
+            )
+            return 0
     except Exception as exc:
-        log.warning("worldpop lookup failed", extra={"error": str(exc)})
+        log.warning("worldpop lookup failed", extra={"error": describe(exc)})
         return 0
 
 
@@ -272,7 +360,7 @@ async def _overpass_count(bbox: BBox, selector: str) -> int:
             response.raise_for_status()
             elements = response.json().get("elements", [])
     except Exception as exc:
-        log.warning("overpass query failed", extra={"error": str(exc)})
+        log.warning("overpass query failed", extra={"error": describe(exc)})
         return 0
 
     if not elements:

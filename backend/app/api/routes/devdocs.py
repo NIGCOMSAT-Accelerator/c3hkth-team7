@@ -250,6 +250,47 @@ becomes a report you can hand back rather than 37 opaque failures.
 `GET /shelter/v1/api/places/search` and `/places/reverse` are there when you need a place
 name resolved on its own, or a pin turned into `country` / `admin1` / `admin2`.
 
+### Address- and building-level input, and the resolution that bounds it
+
+`/places/search` returns the feature's **own outline** in `ring`, with its true area in
+`ring_hectares` and a `monitoring` verdict. So resolving "Wuse Market, Abuja" gives you the
+market's actual perimeter rather than a rectangle around it — which is what lets you show a
+customer their own plot and have them confirm it.
+
+Read `monitoring` before submitting `ring` as an AOI. Three cases, all normal:
+
+    monitoring.outline_is_monitorable  true   -> submit ring verbatim
+    monitoring.enlarged                true   -> the outline is a BUILDING, below the floor
+    monitoring == null                        -> no outline (a street or a village node)
+
+The floor is physical, not a policy: Sentinel is 10 m/pixel, so a typical building footprint is
+~0.15 ha — about **14 pixels** — and a "flooded fraction" over that is dominated by edge effects
+and geolocation error. Measured, Kano Central Mosque resolves to a 17-vertex ring of **0.1473 ha**
+against a `MIN_AOI_HECTARES` of 0.5.
+
+**This does not mean rejecting a precise address.** It means keeping the location and widening the
+measurement: `monitoring.monitored_hectares` is what will actually be watched, and
+`monitoring.note` is a sentence written for an end user that you can display verbatim. An
+administrative boundary hits the same wall from the other side — Argungu LGA is 101,270 ha against
+a 250,000 ha ceiling, Kano State 2,035,580 ha and therefore over it — and reports
+`outline_is_monitorable: false` with wording that asks for the plot inside.
+
+### Type-ahead, if the deployment has it
+
+`GET /shelter/v1/api/places/suggest?q=Argun` returns prefix matches for an address box:
+
+    { "results": [{ "label": "Argungu", "detail": "Kebbi, Nigeria", "lat": …, "lon": … }],
+      "available": true, "attribution": "© OpenStreetMap contributors" }
+
+**Check `available` before showing "no matches".** It is `false` when the deployment runs no
+Photon instance, and an empty `results` means the same thing either way — so treat `false` as
+"fall back to `/places/search`", never as "this address does not exist".
+
+Suggestions carry **no geometry** on purpose. They are for completing a text box; the outline and
+the administrative hierarchy come from `/places/search` once a user has chosen. Rate limited per
+credential per hour and far above interactive typing — if you are bulk-resolving addresses, use
+`/places/search` or `/places/resolve`, which are cached and intended for it.
+
 ### When a place name finds nothing — browse instead
 
 OpenStreetMap's Nigerian coverage is good for towns and thin for villages. `places/search` for
@@ -288,7 +329,7 @@ Two things to code against:
     anything over ~4 deg squared. Use it to position a map, then send a point and a size to
     `/places/resolve`.
 
-**All four `/places/*` endpoints require your API key** — the same
+**Every `/places/*` endpoint requires your API key** — the same
 `X-SHELTER-API-Key` as the rest of this API. No particular scope is needed: there is nothing
 tenant-owned in "where is Argungu?", so the gate is there for attribution and rate control
 rather than authorisation.

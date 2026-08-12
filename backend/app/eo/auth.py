@@ -20,7 +20,7 @@ import time
 import httpx
 
 from app.config import settings
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 
 log = get_logger(__name__)
 
@@ -95,7 +95,7 @@ async def sas_token(collection: str) -> str | None:
         except Exception as exc:
             log.warning(
                 "planetary computer SAS token request failed",
-                extra={"collection": collection, "error": str(exc)},
+                extra={"collection": collection, "error": describe(exc)},
             )
             return None
 
@@ -200,7 +200,7 @@ async def copernicus_token() -> str | None:
                 response.raise_for_status()
                 body = response.json()
         except Exception as exc:
-            log.warning("copernicus token request failed", extra={"error": str(exc)})
+            log.warning("copernicus token request failed", extra={"error": describe(exc)})
             return None
 
         token = body.get("access_token")

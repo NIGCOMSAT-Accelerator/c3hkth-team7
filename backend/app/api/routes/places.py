@@ -1,14 +1,41 @@
 """Place search and AOI geometry helpers — `/shelter/v1/api/places/*`.
 
-Four endpoints in service of one thing: **nobody should need to know what a bounding box is**
+Nine endpoints in service of one thing: **nobody should need to know what a bounding box is**
 to start monitoring a field — not a farmer on a phone, not a partner writing an importer.
 
 | Endpoint | Answers |
 |---|---|
 | `POST /places/resolve` | **"Argungu, 5 hectares" → a submittable area.** The one to build against |
-| `GET /places/search` | "where is Argungu?" — a name to coordinates |
+| `GET /places/suggest` | "…as I type" — prefix matches for an address box |
+| `GET /places/search` | "where is Argungu, and what shape is it?" — a name to coordinates **and its outline** |
 | `GET /places/reverse` | "what is here?" — a pin to country/state/LGA |
 | `POST /places/preview` | "is this area monitorable, and how big is it?" |
+| `GET /places/admin/{states,lgas,wards,extent}` | "browse to it instead" — for when a name finds nothing |
+
+## Address- and building-level precision, and the floor that bounds it
+
+`search` returns the feature's own `ring`, so "Wuse Market, Abuja" resolves the market's real
+perimeter rather than a rectangle around it. That outline is **confirmation**: a rectangle looks
+identical whether we found the right market or one a kilometre away sharing its name.
+
+It is not always a monitoring footprint, and the reason is physical. Sentinel reads 10 m pixels, so
+a building is ~14 of them — measured, Kano Central Mosque is a 17-vertex ring of **0.1473 ha**
+against `MIN_AOI_HECTARES = 0.5`. Below ~50 pixels a "flooded fraction" is edge noise.
+
+So the answer is neither to fake the precision nor to refuse the address: `monitoring` carries the
+exact location **and** the resolution separately, in a sentence written for an end user. The same
+applies at the top end — Kano State's boundary is 2,035,580 ha, well over the 250,000 ha ceiling,
+and comes back as a viewport rather than an area.
+
+## `suggest` and `search` are different engines on purpose
+
+Nominatim is full-text: it resolves "Argungu, Kebbi" well, the prefix "Argun" poorly, and its usage
+policy is one request per second — which forbids a request per keystroke on arithmetic alone. So
+type-ahead is a **self-hosted Photon** prefix index, and `suggest` reports `available: false` when
+none is deployed rather than returning an empty list that reads as "no such place".
+
+Suggestions carry **no geometry**, deliberately: a half-typed string must not be able to become a
+monitored plot. Choosing one leads back to `search`, which is where the outline comes from.
 
 ## Why `preview` exists, and why it is the one that matters most
 
@@ -54,15 +81,31 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.eo import admin, geometry, human, places
+from app.config import settings
+from app.eo import admin, geometry, human, places, suggest
 from app.eo.geometry import GeometryError
 from app.iam.deps import KeyHolder, current_key_holder
 from app.logging_config import get_logger
 from app.models.schemas import BBox
+from app.store import cache
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/places", tags=["places"])
 
+
+class MonitoringNote(BaseModel):
+    """Whether a resolved outline is monitorable as-is, and what to tell the user.
+
+    Mirrors `eo/human.MonitoringNote` onto the wire. Separate from the dataclass for the usual
+    reason: the dataclass is the internal contract and this is the published one, so an internal
+    field cannot leak into the API by being added to a shared type.
+    """
+
+    outline_is_monitorable: bool
+    monitored_hectares: float
+    note: str
+    #: True when the monitored area is larger than what the user outlined — a building, mostly.
+    enlarged: bool
 
 class PlaceResult(BaseModel):
     """One candidate place."""
@@ -77,6 +120,32 @@ class PlaceResult(BaseModel):
     admin1: str | None = None
     admin2: str | None = None
     kind: str | None = None
+
+    #: **The feature's real outline**, as a closed `[[lon, lat], …]` ring.
+    #:
+    #: The market's perimeter, the mosque's walls, the LGA's boundary. Draw this to show the
+    #: user *which* place was found — a rectangle over their district proves nothing, whereas
+    #: their own compound outlined on the map is unambiguous confirmation.
+    #:
+    #: **Null is normal, not an error.** Streets are lines and most villages are single nodes,
+    #: so neither has an outline; `bbox` still frames them. Measured over Nigeria: markets,
+    #: named buildings and administrative areas have rings; roads and settlement nodes do not.
+    #:
+    #: This is for **display and confirmation**, not a monitoring footprint. Submitting it
+    #: verbatim is legitimate only when `monitoring.outline_is_monitorable` is true — a building
+    #: footprint is below the measurement floor and a state boundary is above the ceiling, and
+    #: the write path refuses both.
+    ring: list[list[float]] | None = None
+    #: True area of `ring` in hectares. Null when there is no ring.
+    ring_hectares: float | None = None
+    #: What the pipeline can actually do with `ring`, in a sentence fit to display verbatim.
+    #:
+    #: Present whenever a ring is. This is the field that answers "can you monitor my shop?"
+    #: honestly: it reports the exact location *and* the resolution separately, rather than
+    #: rejecting an address for being precise. See `human.MonitoringNote`.
+    monitoring: MonitoringNote | None = None
+
+
 
 
 class PlaceSearchResponse(BaseModel):
@@ -111,8 +180,127 @@ async def search_places(
     """
     found = await places.search(q, limit=limit, country=country or None)
     return PlaceSearchResponse(
-        results=[PlaceResult(**vars(p)) for p in found],
+        results=[_to_result(p) for p in found],
         attribution=places.ATTRIBUTION,
+    )
+
+
+def _to_result(place: places.Place) -> PlaceResult:
+    """`Place` → wire model, attaching the monitoring verdict when there is an outline.
+
+    Computed on read rather than stored on `Place`, for the same reason `Alert.tracks` is
+    derived in `alerts._attach_tracks`: the verdict depends on `MIN_AOI_HECTARES` and
+    `MAX_AOI_HECTARES`, and a cached `Place` carrying a note computed under an older floor would
+    tell a subscriber something the write path no longer agrees with. `eo/places` caches
+    upstream payloads for a week, so that is a real window, not a theoretical one.
+    """
+    fields = vars(place)
+    note = None
+    if place.ring is not None:
+        verdict = human.monitoring_note(
+            place.ring_hectares,
+            # The place's own name, so the sentence reads "We located Wuse Market exactly"
+            # rather than "that outline". `label` is a full display name, so take the leading
+            # component — the rest is administrative context the user can already see.
+            label=place.label.split(",")[0].strip() or "that outline",
+        )
+        note = MonitoringNote(**vars(verdict))
+    return PlaceResult(**fields, monitoring=note)
+
+
+# --------------------------------------------------------------------------- #
+# Type-ahead
+# --------------------------------------------------------------------------- #
+
+
+class SuggestionResult(BaseModel):
+    """One type-ahead row.
+
+    Carries **no geometry** — deliberately. A suggestion is a label plus enough coordinates to
+    frame a map, and nothing here is sufficient to build an AOI. Selecting one is expected to
+    call `GET /places/search` with the label, which is where the outline and the administrative
+    hierarchy come from.
+
+    That separation is a safety property, not tidiness: if this response could produce an AOI, a
+    half-typed string could too.
+    """
+
+    #: The name the eye lands on — "Argungu".
+    label: str
+    #: The context that disambiguates it — "Kebbi, Nigeria". Nigeria has a Kajola in several
+    #: states, and one combined string makes them look identical at a glance.
+    detail: str
+    lat: float
+    lon: float
+    kind: str | None = None
+    country: str | None = None
+
+
+class SuggestResponse(BaseModel):
+    results: list[SuggestionResult]
+    #: False when no Photon instance is configured. **Check this before showing "no matches"** —
+    #: an empty list means the same thing either way, and telling a user their query found
+    #: nothing because the feature is switched off is a lie. When false, fall back to the
+    #: debounced `GET /places/search`.
+    available: bool
+    attribution: str
+
+
+@router.get("/suggest", response_model=SuggestResponse)
+async def suggest_places(
+    q: str = Query(min_length=2, max_length=120, description="Partially typed place name"),
+    limit: int = Query(default=8, ge=1, le=10),
+    holder: KeyHolder = Depends(current_key_holder),
+) -> SuggestResponse:
+    """Prefix suggestions for a partially typed place — the search-as-you-type surface.
+
+    Separate from `GET /places/search` because the two answer different questions with different
+    engines. Nominatim is full-text: it resolves "Argungu, Kebbi" well and the prefix "Argun"
+    poorly, and its one-request-per-second policy forbids a request per keystroke outright. This
+    route queries a **self-hosted Photon** prefix index, which is built for exactly this.
+
+    `min_length=2` against search's 3: a prefix index can rank "Ka" usefully where full-text
+    matching cannot, and arriving before the user finishes typing is the entire point.
+
+    ## Rate limited per credential, and why that is not optional here
+
+    A per-keystroke endpoint is a far cheaper enumeration surface than a 500 ms-debounced one:
+    an attacker with a valid key could walk the alphabet and harvest a substantial slice of
+    Nigeria's address graph, which is a licence and reputational problem even though the
+    underlying data is public. The ceiling is generous — real typing produces a few hundred
+    requests an hour at most, and it is per *credential* rather than per area, because the
+    resource being protected is our own Photon instance.
+
+    Fails **open** on an unreachable cache, consistent with every other limiter here: refusing
+    to help someone find their farm because a Redis key is missing is the worse failure.
+    """
+    limit_per_hour = settings.place_suggest_rate_limit_per_hour
+    if limit_per_hour > 0:
+        # `holder.label` — "aggregator:<id>" or "platform:service-account". The identity the
+        # audit trail already uses, and deliberately not the key or a hash of it: this value
+        # lands in a cache key that is visible to anyone with datastore access, and a credential
+        # must not be reconstructible from monitoring data.
+        #
+        # One consequence to know: every portal request shares "platform:service-account", so
+        # the portal's own typing is limited **in aggregate** across all subscribers, while each
+        # aggregator gets its own bucket. That is the right shape — the portal is one client of
+        # our Photon instance and the ceiling protects the instance — but it means the limit must
+        # be generous enough for concurrent signups, which is why the default is high.
+        used = await cache.incr(cache.key("place-suggest", holder.label), 3_600)
+        if used > limit_per_hour:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                f"This credential has made {limit_per_hour} suggestion requests this hour, "
+                f"which is far above interactive typing. Use `GET /places/search` for "
+                f"programmatic resolution — it is cached and intended for bulk use.",
+                headers={"Retry-After": "3600"},
+            )
+
+    found = await suggest.suggest(q, limit=limit)
+    return SuggestResponse(
+        results=[SuggestionResult(**s.as_dict()) for s in found],
+        available=suggest.available(),
+        attribution=suggest.ATTRIBUTION,
     )
 
 

@@ -2998,6 +2998,57 @@ a.chip:hover {
   color: var(--accent);
 }
 
+/* The muted context on a type-ahead row.
+
+   A suggestion is two strings — "Argungu" and "Kebbi" — because Nigeria has a Kajola in several
+   states and one combined line makes them indistinguishable at exactly the moment someone is
+   choosing which field to monitor. The name carries the weight; the context sits back. */
+.picker__result-detail {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------------------
+   The resolved outline's confirmation line.
+
+   Shown when a searched place has a real footprint — the market's perimeter, the compound's
+   walls — which is drawn on the map beside it.
+
+   Styled as CONFIRMATION, not as a warning, in both states. A building footprint is ~0.15 ha
+   against a 0.5 ha measurement floor, so the honest message is "we located it exactly, and we
+   monitor the half-hectare around it" — the location is precise and the reading is slightly
+   wider. Amber or red here would read as "your address is wrong", which is the opposite of
+   true and would discourage exactly the precise input this exists to reward.
+
+   `--wide` differs only in icon and border tint, deliberately: the two cases are equally good
+   outcomes, so they must not look like success and failure.
+   --------------------------------------------------------------------------- */
+.picker__outline {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  /* `--sev-info`, deliberately.
+     NOT `--viz-rain` (#0f8f63), even though a green would read as confirmation: the `--viz-*`
+     series are a RESERVED chart palette, validated for colourblind separation against each other,
+     and borrowing one for UI chrome is how that validation stops meaning anything. And not a
+     `--sev-*` alert colour above INFO, because this is not an alert.
+     The icon carries the state; the colour is chrome. */
+  border-left: 3px solid var(--sev-info);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.picker__outline--wide {
+  /* The brand accent rather than a status colour: enlarging the monitored area is a property of
+     the sensor, not a problem with the input. */
+  border-left-color: var(--accent);
+}
+
 /* ---------------------------------------------------------------------------
    The "no results" fallback.
 

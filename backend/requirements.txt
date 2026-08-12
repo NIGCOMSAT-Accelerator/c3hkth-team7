@@ -114,3 +114,10 @@ ruff==0.8.6
 # the DATABASE is missing — which is the condition that actually varies. Making the library
 # optional too would add a second failure mode for no benefit.
 geoip2==5.1.0
+
+# GeoParquet reads over Overture Maps (app/eo/vector.py).
+#
+# Optional at runtime: the import is inside the call and `vector.available()` checks `find_spec`,
+# so a deployment without it degrades to no POI signal rather than failing at import. Pinned
+# because the `bbox` struct predicate and `count_if` are version-sensitive.
+duckdb==1.5.5

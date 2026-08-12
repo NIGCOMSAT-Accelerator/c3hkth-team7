@@ -84,8 +84,25 @@ export default async function AreasPage() {
         <section className="pcard">
           <h2 className="pcard__title">Areas temporarily unavailable</h2>
           <p className="pcard__sub">
-            Your monitoring is unaffected — this is a display problem, not a gap in
-            coverage.
+            Your monitoring is unaffected — this is a display problem, not a coverage gap.
+            Your plots are still being assessed on every satellite pass, and alerts still
+            reach you.
+          </p>
+          {/*
+            The likeliest cause named, because "temporarily unavailable" sent an operator
+            looking for an outage when the API was answering perfectly.
+
+            `safeApi.getSubscriber` returns null for *any* failure — unreachable backend,
+            404, or 401 — so this branch cannot tell them apart. In practice the one that
+            happens is a missing or wrong `SHELTER_API_KEY` on the frontend: `/subscribers`
+            needs a platform credential, so an absent key 401s while sign-in keeps working
+            (that uses the session cookie). The symptom is exactly this page, with a healthy
+            API behind it.
+          */}
+          <p className="authform__hint">
+            If this persists, the portal is most likely missing its API credential
+            (<span className="mono">SHELTER_API_KEY</span>) rather than the service being
+            down — check <a href="/api/status">service status</a>.
           </p>
         </section>
       ) : (

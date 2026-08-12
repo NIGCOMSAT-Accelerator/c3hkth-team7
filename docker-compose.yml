@@ -420,6 +420,34 @@ services:
   # instance returns 403 for `?format=json`, and a Tavily-shaped POST returns an HTML page rather
   # than JSON. Enable it with `search: {formats: [html, json]}` in its settings.yml.
 
+  # NO PHOTON SERVICE HERE EITHER, for the same reason and one stronger one.
+  #
+  # `/places/suggest` type-ahead needs a Photon prefix index. Like the search backend above it is an
+  # OPERATOR CHOICE, set with `PHOTON_URL` — empty disables the feature, the portal keeps its
+  # debounced Nominatim search, and `GET /places/suggest` reports `available: false` so a client can
+  # tell "not deployed" from "no matches".
+  #
+  # The stronger reason: Photon needs an OSM index it builds or downloads itself — tens of GB for a
+  # full planet, and a Nigeria extract still runs to gigabytes plus an Elasticsearch process. That is
+  # not a service a judge should have to provision to try the platform, and `docker compose up`
+  # silently pulling it would be a poor trade for a convenience on one form field.
+  #
+  # Self-hosting is nonetheless the ONLY sane option if the feature is wanted, and this is measured
+  # rather than assumed: the public instance at photon.komoot.io answered a single query in **23
+  # seconds**. Behind a keystroke that is not a slow feature, it is a broken one — so there is no
+  # "just point at the public one" fallback to offer.
+  #
+  #   PHOTON_URL=https://photon.example.org    -> type-ahead on
+  #   PHOTON_URL=                (default)     -> debounced full search only
+  #
+  # One gotcha, seen while wiring this: put it behind a reverse proxy with a real certificate and a
+  # router that actually matches the host. A Traefik instance with no matching router serves its
+  # DEFAULT self-signed cert and a 404, and `httpx` then fails certificate verification — which the
+  # adapter logs at DEBUG (one line per keystroke would drown the log otherwise), so the symptom is
+  # simply no suggestions and nothing obvious to read. Check with:
+  #
+  #   curl -s -o /dev/null -w '%{http_code}\n' "$PHOTON_URL/api?q=Argungu&limit=1"    # expect 200
+
   # Optional: self-hosted Signal gateway.
   # Enable with `docker compose --profile signal up`.
   # First run needs a one-time device link — see README.

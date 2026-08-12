@@ -58,7 +58,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import settings
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import AreaOfInterest
 from app.store import cache
 
@@ -139,7 +139,7 @@ async def _arcgis_envelope_query(
             payload = response.json()
     except Exception as exc:  # noqa: BLE001 — resolution must never fail an assessment
         log.warning(
-            "arcgis admin lookup failed", extra={"service": service, "error": str(exc)}
+            "arcgis admin lookup failed", extra={"service": service, "error": describe(exc)}
         )
         return None
 
@@ -291,7 +291,7 @@ async def resolve_geoboundaries(bbox: list[float], iso3: str = "NGA") -> AdminPl
             response.raise_for_status()
             payload = response.json()
     except Exception as exc:  # noqa: BLE001
-        log.warning("geoboundaries lookup failed", extra={"error": str(exc)})
+        log.warning("geoboundaries lookup failed", extra={"error": describe(exc)})
         return None
 
     name = payload.get("boundaryName")
@@ -386,7 +386,7 @@ async def enrich(aoi: AreaOfInterest) -> AreaOfInterest:
     try:
         found = await resolve(aoi.bbox.as_list(), country=aoi.country)
     except Exception as exc:  # noqa: BLE001 — registration must never fail over a place name
-        log.warning("admin enrichment failed", extra={"aoi_id": aoi.id, "error": str(exc)})
+        log.warning("admin enrichment failed", extra={"aoi_id": aoi.id, "error": describe(exc)})
         return aoi
 
     if found is None:
@@ -560,7 +560,7 @@ async def _arcgis_browse(params: dict) -> dict | None:
             response.raise_for_status()
             payload = response.json()
     except Exception as exc:  # noqa: BLE001
-        log.warning("arcgis browse failed", extra={"error": str(exc)})
+        log.warning("arcgis browse failed", extra={"error": describe(exc)})
         return None
 
     if "error" in payload:
@@ -715,7 +715,7 @@ async def _arcgis_browse_wards(params: dict) -> dict | None:
             response.raise_for_status()
             payload = response.json()
     except Exception as exc:  # noqa: BLE001
-        log.warning("arcgis ward browse failed", extra={"error": str(exc)})
+        log.warning("arcgis ward browse failed", extra={"error": describe(exc)})
         return None
 
     if "error" in payload:

@@ -2368,6 +2368,35 @@
         "title": "MfaVerifyRequest",
         "type": "object"
       },
+      "MonitoringNote": {
+        "description": "Whether a resolved outline is monitorable as-is, and what to tell the user.\n\nMirrors `eo/human.MonitoringNote` onto the wire. Separate from the dataclass for the usual\nreason: the dataclass is the internal contract and this is the published one, so an internal\nfield cannot leak into the API by being added to a shared type.",
+        "properties": {
+          "enlarged": {
+            "title": "Enlarged",
+            "type": "boolean"
+          },
+          "monitored_hectares": {
+            "title": "Monitored Hectares",
+            "type": "number"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "outline_is_monitorable": {
+            "title": "Outline Is Monitorable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "outline_is_monitorable",
+          "monitored_hectares",
+          "note",
+          "enlarged"
+        ],
+        "title": "MonitoringNote",
+        "type": "object"
+      },
       "MyAccessResponse": {
         "description": "What this member may do \u2014 the answer both the portal nav and the API guard against.\n\nReturned as a single call so the portal never has to derive permissions from a role name.\nDuplicating `ROLE_PERMISSIONS` in TypeScript is precisely how a UI ends up showing a\nbutton the API refuses, or hiding one it would have allowed.",
         "properties": {
@@ -2614,6 +2643,44 @@
           "lon": {
             "title": "Lon",
             "type": "number"
+          },
+          "monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonitoringNote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ring": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ring"
+          },
+          "ring_hectares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ring Hectares"
           }
         },
         "required": [
@@ -4112,6 +4179,83 @@
         ],
         "title": "SubscriberKind",
         "type": "string"
+      },
+      "SuggestResponse": {
+        "properties": {
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestionResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results",
+          "available",
+          "attribution"
+        ],
+        "title": "SuggestResponse",
+        "type": "object"
+      },
+      "SuggestionResult": {
+        "description": "One type-ahead row.\n\nCarries **no geometry** \u2014 deliberately. A suggestion is a label plus enough coordinates to\nframe a map, and nothing here is sufficient to build an AOI. Selecting one is expected to\ncall `GET /places/search` with the label, which is where the outline and the administrative\nhierarchy come from.\n\nThat separation is a safety property, not tidiness: if this response could produce an AOI, a\nhalf-typed string could too.",
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "detail",
+          "lat",
+          "lon"
+        ],
+        "title": "SuggestionResult",
+        "type": "object"
       },
       "TeamMember": {
         "properties": {
@@ -9484,6 +9628,73 @@
           }
         ],
         "summary": "Search Places",
+        "tags": [
+          "places"
+        ]
+      }
+    },
+    "/shelter/v1/api/places/suggest": {
+      "get": {
+        "description": "Prefix suggestions for a partially typed place \u2014 the search-as-you-type surface.\n\nSeparate from `GET /places/search` because the two answer different questions with different\nengines. Nominatim is full-text: it resolves \"Argungu, Kebbi\" well and the prefix \"Argun\"\npoorly, and its one-request-per-second policy forbids a request per keystroke outright. This\nroute queries a **self-hosted Photon** prefix index, which is built for exactly this.\n\n`min_length=2` against search's 3: a prefix index can rank \"Ka\" usefully where full-text\nmatching cannot, and arriving before the user finishes typing is the entire point.\n\n## Rate limited per credential, and why that is not optional here\n\nA per-keystroke endpoint is a far cheaper enumeration surface than a 500 ms-debounced one:\nan attacker with a valid key could walk the alphabet and harvest a substantial slice of\nNigeria's address graph, which is a licence and reputational problem even though the\nunderlying data is public. The ceiling is generous \u2014 real typing produces a few hundred\nrequests an hour at most, and it is per *credential* rather than per area, because the\nresource being protected is our own Photon instance.\n\nFails **open** on an unreachable cache, consistent with every other limiter here: refusing\nto help someone find their farm because a Redis key is missing is the worse failure.",
+        "operationId": "suggest_places_shelter_v1_api_places_suggest_get",
+        "parameters": [
+          {
+            "description": "Partially typed place name",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Partially typed place name",
+              "maxLength": 120,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 8,
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AggregatorApiKey": []
+          },
+          {
+            "PlatformApiKey": []
+          }
+        ],
+        "summary": "Suggest Places",
         "tags": [
           "places"
         ]

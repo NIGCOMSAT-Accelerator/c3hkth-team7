@@ -88,6 +88,32 @@ class Place:
     #: that shares its name.
     kind: str | None
 
+    #: **The actual outline of the feature**, as a closed `[[lon, lat], …]` ring — the
+    #: mosque's walls, the market's perimeter, the ward's boundary.
+    #:
+    #: ## Why this was worth adding
+    #:
+    #: Nominatim has always been able to return this; we simply never asked for it
+    #: (`polygon_geojson=1`). So a search for "Wuse Market, Abuja" resolved a real 17-vertex
+    #: perimeter upstream and we kept **four numbers** — the envelope — and threw the shape
+    #: away. The subscriber then saw a rectangle over their market and had no way to tell
+    #: whether we had found *their* market or something a kilometre away with a similar name.
+    #:
+    #: That is the whole confirmation problem: the pipeline was locating places correctly and
+    #: was unable to show its work.
+    #:
+    #: None for a point result (a village node) or a line (a street), which is not a failure —
+    #: most OSM features genuinely have no polygon, and `bbox` still frames them. Callers must
+    #: treat this as a bonus, never as required.
+    ring: list[list[float]] | None = None
+    #: True area of `ring` in hectares, or None when there is no ring.
+    #:
+    #: Carried here rather than recomputed by every caller because it is what decides whether
+    #: the outline can be monitored *as drawn* — and a building almost never can. Measured:
+    #: Kano Central Mosque is **0.147 ha**, about 14 Sentinel pixels, against a
+    #: `MIN_AOI_HECTARES` floor of 0.5. See `human.monitoring_note`.
+    ring_hectares: float | None = None
+
 
 def _pick_admin(address: dict) -> tuple[str | None, str | None]:
     """(admin1, admin2) from Nominatim's `address` object.
@@ -134,6 +160,8 @@ def _to_place(raw: dict) -> Place | None:
         except (TypeError, ValueError):
             bbox = None
 
+    ring, ring_hectares = _outline(raw.get("geojson"))
+
     return Place(
         label=raw.get("display_name") or raw.get("name") or f"{lat:.4f}, {lon:.4f}",
         lat=lat,
@@ -143,7 +171,108 @@ def _to_place(raw: dict) -> Place | None:
         admin1=admin1,
         admin2=admin2,
         kind=raw.get("type") or raw.get("class"),
+        ring=ring,
+        ring_hectares=ring_hectares,
     )
+
+
+def _outline(geojson: object) -> tuple[list[list[float]] | None, float | None]:
+    """The feature's own outline as a normalised ring, plus its true area.
+
+    ## What upstream sends, measured
+
+    `polygon_geojson=1` returns a real GeoJSON geometry whose type depends entirely on what
+    the feature *is*, and all four of these occur in ordinary Nigerian searches:
+
+        Wuse Market, Abuja           Polygon         -> a ring, usable
+        Kano Central Mosque          Polygon         -> a ring, 17 vertices, 0.147 ha
+        Argungu                      Polygon         -> the LGA boundary, usable
+        Adeola Odeku Street, Lagos   LineString      -> no ring; a street has no area
+        Argungu (the town node)      Point           -> no ring
+        a multi-part district        MultiPolygon    -> take the largest part
+
+    So returning None is the *common* case, not an error path. A caller that treats a missing
+    ring as failure would reject street and settlement results, which are most of them.
+
+    **MultiPolygon takes the largest part rather than merging.** Merging would need a real
+    union and would produce a shape spanning the gap between two disjoint pieces of a
+    district — which is not ground the subscriber owns, and every fraction measured over it
+    would be diluted by whatever lies between.
+
+    Any malformed geometry yields `(None, None)`: the `bbox` still frames the result, so a bad
+    outline must degrade to the old behaviour rather than lose the search hit.
+    """
+    if not isinstance(geojson, dict):
+        return None, None
+
+    kind = geojson.get("type")
+    coords = geojson.get("coordinates")
+
+    if kind == "Polygon":
+        outer = coords[0] if isinstance(coords, list) and coords else None
+    elif kind == "MultiPolygon":
+        if not isinstance(coords, list) or not coords:
+            return None, None
+        # Largest by vertex count — a proxy for area that cannot raise on a degenerate part,
+        # and the choice only has to be *stable*, since a district's main body is also its
+        # most densely digitised.
+        try:
+            outer = max(
+                (p[0] for p in coords if isinstance(p, list) and p),
+                key=len,
+                default=None,
+            )
+        except (TypeError, ValueError):
+            return None, None
+    else:
+        # Point, LineString, GeometryCollection — no area to monitor.
+        return None, None
+
+    if not isinstance(outer, list) or len(outer) < 3:
+        return None, None
+
+    try:
+        ring = [[float(x), float(y)] for x, y in outer]
+    except (TypeError, ValueError):
+        return None, None
+
+    # Close it, so what we return is valid GeoJSON a map can draw directly.
+    if ring[0] != ring[-1]:
+        ring.append(list(ring[0]))
+
+    # **Deliberately NOT `geometry.validate_ring`**, and this distinction is the point.
+    #
+    # `validate_ring` guards the *write* path: it caps vertices at 200 because its
+    # self-intersection check is O(n²), and it is the gate on a ring that will become a
+    # rasterised monitoring mask. Kano State's boundary is 1,371 vertices, so routing this
+    # through it returned **no outline at all for any state** — the search would resolve the
+    # boundary upstream and then silently discard it, which is the exact bug this whole change
+    # set out to fix, reintroduced one layer down.
+    #
+    # An outline here is *cartography*: something to draw so the user can confirm we found the
+    # right place. It is never rasterised and never monitored — `/places/preview` and the write
+    # path still run the full validation on whatever the user actually submits. A bow-tie in an
+    # OSM administrative boundary would render slightly oddly and mislead nobody, so paying
+    # O(1371²) to reject it buys nothing.
+    #
+    # `ring_hectares` is likewise informational: it is what `human.monitoring_note` uses to say
+    # "this outline is smaller than we can measure", which is a *sentence*, not a mask.
+    from app.eo import geometry
+
+    # `ArithmeticError`/`TypeError`/`ValueError` only — deliberately NOT a bare `Exception`.
+    #
+    # A broad handler here silently absorbed a `GeometryError`, so a future edit routing this
+    # through `validate_ring` would still return the ring and no test would notice. Caught by
+    # mutation-testing the guard: the mutant escaped, which means the narrow `except` is doing
+    # load-bearing work rather than being style.
+    #
+    # `polygon_area_hectares` is pure shoelace arithmetic over floats, so these three are the
+    # only failures it can produce, and anything else IS a bug worth surfacing.
+    try:
+        return ring, round(geometry.polygon_area_hectares(ring), 4)
+    except (ArithmeticError, TypeError, ValueError):
+        log.debug("could not measure an upstream outline", exc_info=True)
+        return ring, None
 
 
 async def _get(path: str, params: dict) -> list[dict] | dict | None:
@@ -171,7 +300,28 @@ async def _get(path: str, params: dict) -> list[dict] | dict | None:
             ) as client:
                 response = await client.get(
                     f"{settings.nominatim_url.rstrip('/')}/{path}",
-                    params={**params, "format": "jsonv2", "addressdetails": 1},
+                    params={
+                        **params,
+                        "format": "jsonv2",
+                        "addressdetails": 1,
+                        # **The feature's real outline.** Costs one parameter and was simply
+                        # never asked for, so every search discarded the geometry upstream had
+                        # already computed and kept only the four-number envelope. See
+                        # `_outline` for what actually comes back.
+                        "polygon_geojson": 1,
+                        # **Deliberately NOT simplified**, and this was measured rather than
+                        # assumed. `polygon_threshold=0.0005` (~55 m, finer than a Sentinel
+                        # pixel, so it looked free) cut Kano Central Mosque from 17 vertices to
+                        # 4 and its area from 0.147 ha to 0.066 ha — a **55% error on the very
+                        # features this change exists to resolve**. Simplification tolerance is
+                        # absolute while feature sizes here span five orders of magnitude, so
+                        # one threshold cannot serve both a building and a state.
+                        #
+                        # The cost it was meant to avoid does not exist: unsimplified, the
+                        # largest realistic response is a whole state boundary at 1,371
+                        # vertices and **33 KB**. That is a rounding error in a cache holding
+                        # week-long place entries.
+                    },
                     headers=_HEADERS,
                 )
         except Exception as exc:  # noqa: BLE001

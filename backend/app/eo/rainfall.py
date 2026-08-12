@@ -30,7 +30,7 @@ import httpx
 from app.config import settings
 from app.eo import auth
 from app.eo.geometry import bbox_geojson
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import BBox, ForecastPoint, RainfallOutlook
 
 log = get_logger(__name__)
@@ -88,7 +88,7 @@ async def rainfall_outlook(bbox: BBox, *, days: int | None = None) -> RainfallOu
                 source="gfs-forecast",
             )
     except Exception as exc:
-        log.warning("short-range rainfall forecast unavailable", extra={"error": str(exc)})
+        log.warning("short-range rainfall forecast unavailable", extra={"error": describe(exc)})
 
     # 2-4 — observational fallbacks, ordered by CURRENCY, not by cost.
     #
@@ -117,7 +117,7 @@ async def rainfall_outlook(bbox: BBox, *, days: int | None = None) -> RainfallOu
             observed = await fetch(bbox)
         except Exception as exc:
             log.warning(
-                "antecedent source failed", extra={"source": name, "error": str(exc)}
+                "antecedent source failed", extra={"source": name, "error": describe(exc)}
             )
             continue
         if observed is not None:
@@ -413,7 +413,7 @@ async def _imerg_granules(
         response.raise_for_status()
         entries = response.json().get("feed", {}).get("entry", [])
     except Exception as exc:  # noqa: BLE001
-        log.warning("CMR granule search failed", extra={"error": str(exc)})
+        log.warning("CMR granule search failed", extra={"error": describe(exc)})
         return []
 
     found: list[tuple[str, str]] = []
@@ -494,7 +494,7 @@ async def _imerg_antecedent(bbox: BBox) -> float | None:
             except Exception as exc:  # noqa: BLE001 — one missing day must not lose the series
                 log.debug(
                     "IMERG granule unreadable",
-                    extra={"day": day_label, "error": str(exc)[:80]},
+                    extra={"day": day_label, "error": describe(exc)[:80]},
                 )
                 continue
             if value is not None and value >= 0:
@@ -782,7 +782,7 @@ async def _spi_for(bbox: BBox, current_mm: float, window_days: int) -> float | N
 
         return compute_spi(current_mm, history)
     except Exception as exc:
-        log.debug("SPI unavailable", extra={"error": str(exc)})
+        log.debug("SPI unavailable", extra={"error": describe(exc)})
         return None
 
 
@@ -853,7 +853,7 @@ async def _api_from_series(bbox: BBox) -> float:
         # expects — oldest first, so the last element is yesterday.
         return antecedent_precipitation_index([p.rainfall_mm for p in points])
     except Exception as exc:
-        log.debug("API unavailable", extra={"error": str(exc)})
+        log.debug("API unavailable", extra={"error": describe(exc)})
         return 0.0
 
 

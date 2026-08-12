@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import ndimage
 
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import BBox
 
 log = get_logger(__name__)
@@ -297,7 +297,7 @@ async def terrain_profile(bbox: BBox) -> TerrainProfile:
             return TerrainProfile(available=False)
         bands = await cog.read_bands({"dem": asset.href}, bbox)
     except Exception as exc:
-        log.warning("terrain DEM read failed", extra={"error": str(exc)})
+        log.warning("terrain DEM read failed", extra={"error": describe(exc)})
         return TerrainProfile(available=False)
 
     profile = terrain_profile_from_dem(bands["dem"])
@@ -357,7 +357,7 @@ async def permanent_water_mask(bbox: BBox) -> np.ndarray | None:
             return None
         bands = await cog.read_bands({"occurrence": asset.href}, bbox)
     except Exception as exc:
-        log.warning("permanent-water read failed", extra={"error": str(exc)})
+        log.warning("permanent-water read failed", extra={"error": describe(exc)})
         return None
 
     occurrence = bands["occurrence"]

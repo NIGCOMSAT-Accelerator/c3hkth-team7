@@ -57,7 +57,7 @@ import httpx
 
 from app.config import settings
 from app.eo import auth
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import BBox, SoilMoisture
 
 log = get_logger(__name__)
@@ -181,7 +181,7 @@ async def _recent_granules(
         response.raise_for_status()
         entries = response.json().get("feed", {}).get("entry", [])
     except Exception as exc:  # noqa: BLE001
-        log.warning("SMAP granule search failed", extra={"error": str(exc)})
+        log.warning("SMAP granule search failed", extra={"error": describe(exc)})
         return None
 
     found: list[tuple[str, str]] = []
@@ -219,7 +219,7 @@ async def _read_variable(
     except Exception as exc:  # noqa: BLE001
         log.warning(
             "SMAP variable read failed",
-            extra={"variable": variable, "error": str(exc)},
+            extra={"variable": variable, "error": describe(exc)},
         )
         return []
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 import httpx
 
 from app.config import settings
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import BBox, HealthBaseline
 
 log = get_logger(__name__)
@@ -34,7 +34,26 @@ async def malaria_baseline(bbox: BBox) -> HealthBaseline:
 
     NOTE: written from the GeoServer WMS contract; not validated against a live
     MAP response. Failure is handled and degrades the cascade to "not asserted".
+
+    ## Upstream status, verified 2026-08-12
+
+    `data.malariaatlas.org/geoserver` returns **504 Gateway Time-out** for every request —
+    `GetCapabilities`, `GetFeatureInfo`, and the `GetMap` tile requests MAP's own portal
+    makes. The host itself serves 200; only the GeoServer path is down. That is an upstream
+    outage, not a fault here, and it is why `worker-1` logs `malaria atlas lookup failed` on
+    every cycle. The layer name was *also* stale (MAP version-prefixes them and retires the
+    old ones — see `config.malaria_atlas_layer`), so this would have failed on a healthy
+    server too; both are now correct and the request will start answering when MAP returns.
+
+    `MALARIA_ATLAS_ENABLED=false` skips it in the meantime. Returning the same unavailable
+    baseline as the failure path is what makes that switch safe: the malaria cascade is
+    gated on `available and endemic`, so disabling this asserts nothing rather than
+    asserting non-endemic.
     """
+    if not settings.malaria_atlas_enabled:
+        log.debug("malaria atlas disabled; cascade will not be asserted")
+        return HealthBaseline()
+
     lon, lat = bbox.centroid
     # A minimal bbox around the point; GetFeatureInfo needs a viewport, and we
     # query its centre pixel.
@@ -64,7 +83,14 @@ async def malaria_baseline(bbox: BBox) -> HealthBaseline:
             response.raise_for_status()
             payload = response.json()
     except Exception as exc:
-        log.warning("malaria atlas lookup failed", extra={"error": str(exc)})
+        # `describe` rather than `str(exc)`: the failure that actually happens here is a
+        # timeout, and every `httpx` timeout class stringifies to the empty string — which is
+        # how this shipped as `{"msg": "malaria atlas lookup failed", "error": ""}` in the
+        # runtime logs, a warning that named the source and then withheld the reason.
+        log.warning(
+            "malaria atlas lookup failed; malaria cascade not asserted",
+            extra={"error": describe(exc)},
+        )
         return HealthBaseline()
 
     value = _extract_rate(payload)

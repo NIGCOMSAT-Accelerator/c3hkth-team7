@@ -18,7 +18,7 @@ from __future__ import annotations
 import httpx
 
 from app.config import settings
-from app.logging_config import get_logger
+from app.logging_config import describe, get_logger
 from app.models.schemas import BBox, SoilProfile
 
 log = get_logger(__name__)
@@ -51,7 +51,7 @@ async def soil_profile(bbox: BBox) -> SoilProfile:
             response.raise_for_status()
             payload = response.json()
     except Exception as exc:
-        log.warning("soilgrids lookup failed", extra={"error": str(exc)})
+        log.warning("soilgrids lookup failed", extra={"error": describe(exc)})
         return SoilProfile()
 
     clay = _extract(payload, "clay")
