@@ -192,7 +192,7 @@ Next.js App Router, server-side rendered, dark/light with WCAG-checked contrast.
 | `team` | Colleagues, roles, invitations |
 | `activity` · `security` · `compliance` | Audit log, TOTP + trusted devices, data-handling record |
 
-### 3.2 Open datasets — 16 upstreams, all free, no paid platform
+### 3.2 Open datasets — 16 pipeline upstreams, plus 3 for input, all free, no paid platform
 
 Declared as data in `app/eo/sources.py`: env key, credential requirement, real
 publication cadence, and failover target. **Every chain has at least one keyless
@@ -213,6 +213,16 @@ source**, so the whole system runs with no credentials at all.
 | **Health baseline** | Malaria Atlas Project *Pf*PR |
 | **Admin boundaries** | GRID3 Nigeria → geoBoundaries (Africa fallback) |
 
+Three further sources serve **AOI input and context** rather than measurement, which is why they are
+not in `app/eo/sources.py` — that registry declares the chains a *risk assessment* is built from, and
+a geocoder contributes no number to one:
+
+| Role | Source |
+|---|---|
+| **Geocoding — full text** | Nominatim (OpenStreetMap), proxied and rate-limited server-side |
+| **Geocoding — type-ahead** | **Photon**, self-hosted (`PHOTON_URL`). Optional; see §3.2.1 |
+| **POI / commercial density** | **Overture Maps** GeoParquet via DuckDB. Optional; see §3.2.2 |
+
 Two rules that make this trustworthy rather than merely plumbed:
 
 - **Absent data never becomes an implied claim.** `rainfall._flat_series` returns a
@@ -223,6 +233,76 @@ Two rules that make this trustworthy rather than merely plumbed:
   and ERA5 report how wet the ground already is. `forecast_is_prediction` carries the
   distinction all the way to the wording, because "126 mm expected" and "126 mm already
   fell" call for opposite actions.
+
+#### 3.2.1 Address resolution — Nominatim, plus optional self-hosted Photon
+
+Two geocoders, because they answer different questions and neither can do the other's job.
+
+**Nominatim** (OpenStreetMap) is full-text: it resolves *"Argungu, Kebbi"* well and the prefix
+*"Argun"* poorly, because a prefix is not a name. Its usage policy is **one request per second**,
+which forbids a request per keystroke on arithmetic alone. It is proxied through the backend —
+never called from the browser — so the rate limit is honoured process-wide, one cache serves every
+subscriber, and no subscriber's IP is handed to a third party alongside the district they are
+registering.
+
+Since this release the search also asks for `polygon_geojson`, so a result carries the feature's
+**own outline** rather than only a bounding box. Measured over Nigeria:
+
+| Query | Resolves to |
+|---|---|
+| `Wuse Market, Abuja` | a 20-vertex market perimeter, **7.74 ha** |
+| `Kano Central Mosque` | a 17-vertex building footprint, **0.1473 ha** |
+| `Argungu` | the LGA boundary, 106 vertices |
+| `Adeola Odeku Street, Lagos` | a LineString — **no outline**, which is normal for a street |
+
+**Photon** is a prefix index over the same OSM data, built for search-as-you-type. It is
+**self-hosted and optional**:
+
+```
+PHOTON_URL=                        # empty (default) — feature off, debounced full search only
+PHOTON_URL=https://photon.example  # type-ahead on
+PHOTON_COUNTRIES=ng                # hard country filter; comma-separated for several
+```
+
+Self-hosting is not a preference. The public instance at `photon.komoot.io` measured **23 seconds**
+per query; behind a keystroke that is not slow but broken. A self-hosted instance answers in
+**~0.25 s**, and resolves to street and building level — `"Adeola Odek"` returns Adeola Odeku
+Street plus the Spar and the Sterling Bank *on* it.
+
+`PHOTON_COUNTRIES` is a **hard** filter and it earns its place: proximity bias alone is not enough,
+because exact name-similarity outranks it. Typing `"Argun"` unfiltered returned a village in
+Uzbekistan, two in Türkiye and a town in Chechnya — all ahead of Argungu, Kebbi.
+
+`GET /places/suggest` reports **`available: false`** when no instance is configured, so a client can
+tell "not deployed" from "no matches". That distinction matters: telling someone their address does
+not exist because a container is missing is a lie they cannot diagnose.
+
+**The measurement floor is stated, never hidden.** A building footprint is ~0.15 ha against a
+`MIN_AOI_HECTARES` of 0.5 — roughly 14 Sentinel pixels, below which a flooded fraction is edge
+noise. So an address is accepted at full precision and the monitored area is reported separately:
+*"We located Kano Central Mosque exactly — about 1,473 square metres. That is finer than the
+satellites can measure, so we will monitor the 0.5 hectares around it."* Refusing a correct address
+would be the wrong answer; so would pretending to measure a shopfront.
+
+#### 3.2.2 Overture Maps — the first *vector* source, and its honest limits
+
+Every other reader in `app/eo/` reads **rasters**. Overture is columnar vector data (one row per
+building or business), read **in place** over HTTP range reads with DuckDB + `httpfs` — Parquet
+row-group statistics prune to the AOI, which is the same bargain `eo/cog.py` makes on GeoTIFFs.
+
+Not copied into our own object store on purpose: that would add a multi-gigabyte sync job and a
+staleness question against a monthly release, to speed up queries that already finish in seconds.
+
+**What is actually there for Nigeria**, measured 2026-08-12 — and one row changes what can be built:
+
+| Theme | Over a Lagos bbox | Verdict |
+|---|---|---|
+| `places` | **53,865 POIs** with categories, phones, websites | **Usable.** The commercial-density signal the platform otherwise has no proxy for |
+| `buildings` | 1,227,116 footprints | Geometry only — **0.19%** carry a height, **0.07%** a name. ~110 s/AOI, so off the request path |
+| `addresses` | **0** | **Does not exist in Africa.** 39 countries, none African |
+
+So **Overture cannot verify an African address** — that capability is Nominatim + Photon, above.
+DuckDB is an optional dependency; absent, `vector.available()` is false and nothing else changes.
 
 ### 3.3 Supported spatial queries
 
@@ -976,6 +1056,139 @@ adding them is a registry entry plus an adapter, not new infrastructure.
 account and cannot be anonymous. Use Element84 or `landsatlook.usgs.gov/stac-server`
 — both keyless, both verified. Every other source in the brief is free with no paid
 tier on the paths used here.
+
+---
+
+## 6.5 Next phase — Track D: Financial & Credit Risk Intelligence
+
+**Wired as an activatable track, deliberately delivering nothing yet.** `GET /iam/tracks` returns it
+with `deliverable: false` and a **per-capability breakdown**, because one "coming soon" label across
+eight capabilities at four different stages would be both less credible and less useful than a list
+that is defensible line by line.
+
+### Why this track matters here
+
+Across much of Africa the binding constraint on credit is not appetite — it is **verifiable
+context**. A lender cannot confirm that a declared shop exists, that a farm is where the applicant
+says, or that a neighbourhood supports the trade being financed. The usual response is to demand
+collateral or decline, and the cost of that lands on people who are creditworthy and simply
+unverifiable.
+
+Earth Observation and open geospatial data can supply that context — and the same discipline that
+makes a flood warning trustworthy is what makes this defensible rather than dangerous:
+**a measured number may inform a score; prose about a place may not.** A wrongly declined loan is
+harder for the subject to appeal than an alert that did not arrive, so the track is built to be
+explainable and challengeable before it is built to be broad.
+
+### Status, capability by capability
+
+| Capability | Status | What stands in the way |
+|---|---|---|
+| **Lender portfolio exposure** | `ready` | A lender-facing surface. **No new measurement** — this IS the existing Oracle: severity per area, scored, timelined, Fahis-verified, pointed at a loan book instead of a farm |
+| **Neighbourhood demographic & commercial scoring** | `ready` | Composition and weighting. WorldPop 100 m, WorldCover built-up fraction, Copernicus DEM and Overture POI density are all wired; none is yet combined into a score, and that combination is the part needing review |
+| **Agent / merchant / MSME network intelligence** | `feasible` | Two more Overpass queries. `eo/exposure.py` runs exactly two today, so `shop=*`, `office=*` and `highway=*` are cheap additions on the same helper |
+| **PoS terminal anchor verification** (CBN geo-fencing) | `feasible` | A surface and a scoring composition — every input is wired. **Scope limit below** |
+| **KYC/KYB address verification** | `partial` | Answers *"inside a mapped settlement, near a road, in a built-up cell, and does the declared place resolve to a real feature"* — `/places/resolve` already returns the footprint and its true area. Cannot yet answer *"is this the declared building"*: that needs building footprints (`ms-buildings`, reachable, unbuilt) |
+| **Fraud & synthetic-location detection** | `partial` | Settlement/road/land-use cross-checks work with data already ingested. Impossible-movement and duplicate-agent clustering need consented GPS |
+| **Residency & business-permanence timelines** | `blocked` | **The consent layer, which does not exist.** See below |
+| **HR-tech background-verification support** | `blocked` | The consent layer, plus a governance decision this platform has not made. See below |
+
+### The CBN PoS geo-fencing directive — and why 70 metres is the whole story
+
+The Central Bank of Nigeria requires every PoS terminal to be geo-fenced to its registered business
+address, with **enforcement from 1 August 2026**. The radius began at 10 m and was relaxed to **70 m**
+after operators reported practical hurdles.
+
+**That relaxation is what makes satellite verification possible at all**, and the arithmetic is worth
+seeing:
+
+| Radius | Disc area | Sentinel pixels | Measurable? |
+|---|---|---|---|
+| 10 m (original) | 314 m² = **0.0314 ha** | ~3 | **No** — far below `MIN_AOI_HECTARES`, edge noise by definition |
+| 70 m (current) | 15,394 m² = **1.5394 ha** | ~153 | **Yes** — comfortably above the 0.5 ha floor |
+
+A regulatory concession made for practical reasons moved this from impossible to buildable.
+`tests/test_intelligence_tracks.py` asserts both figures, so if the floor ever rises above ~1.5 ha
+the capability stops being measurable and the build says so — rather than a demo quietly reporting a
+built-up fraction over three pixels.
+
+#### What we verify, and what we deliberately do not
+
+The directive needs three things, and only one of them is ours:
+
+| Requirement | Whose job |
+|---|---|
+| Terminal transmits dual-frequency GPS at transaction time | **The terminal's** — hardware we do not make |
+| Live coordinates compared against the registered address | A haversine any PSP writes themselves |
+| Flag / decline / disable outside the radius | **The PSP's switch** — Moniepoint, OPay, PalmPay |
+
+So SHELTER does **not** sell geo-fencing enforcement, and saying so protects the operator rather than
+us: a fintech that believed we provided the enforcement leg could fail an audit on our wording.
+
+**What nobody answers at national scale is whether the anchor is genuine.** The directive exists to
+catch **ghost and cloned terminals** — and geo-fencing a terminal against a *fake* address enforces
+nothing, because the terminal sits happily within 70 m of a coordinate in the middle of a swamp. That
+is the gap, and it is answerable from data already wired:
+
+- does the registered address **resolve to a real mapped feature**, with an outline and a true area
+  (`/places/resolve`, live today);
+- is the 70 m disc **built-up**, or is it water, cropland or unmapped scrub (ESA WorldCover);
+- is there **commercial activity** in the catchment (Overture `places`);
+- is it **near a road** (Overpass `highway=*`).
+
+Onboarding-time and audit-time verification, with `ScoreDriver`-style per-input attribution so a
+declined registration can be explained and challenged. Not transaction-time enforcement — which also
+keeps us out of the payment path, where our downtime would become someone else's outage.
+
+### Two limits that will not be engineered away
+
+**The measurement floor is physics.** `MIN_AOI_HECTARES` is 0.5 ha because below ~50 Sentinel
+pixels a fraction is dominated by edge effects and geolocation error. A typical urban plot is
+**0.02–0.05 ha** — an order of magnitude below it. So *"verify this house"* is not a pixel
+measurement, and forcing the imagery pipeline to answer it would emit exactly the precise-looking
+meaningless number this codebase refuses everywhere. The track therefore relocates to **vector and
+contextual** intelligence: footprints, POI, settlement and road data. That is a different engine,
+and saying so is more useful than a demo that appears to measure a rooftop.
+
+**Overture cannot verify an African address.** Measured 2026-08-12: `theme=addresses` covers 39
+countries and **none of them are in Africa** — zero records over a Lagos bbox. Address resolution is
+Nominatim plus self-hosted Photon (§3.2.1); Overture contributes POI and commercial density
+(53,865 records over Lagos), which is a real signal for this track but not that one.
+
+### The consent layer is built first, not retrofitted
+
+Three capabilities — residency timelines, impossible-movement fraud detection, and the HR-tech
+case — need **consented location streams**. Verified: there is **no consent primitive anywhere in
+this codebase.** No consent record, no lawful-basis field, no purpose limitation, no per-subject
+retention. The nearest machinery is `audit.py`'s `expires_at` TTL index — right bones, wrong
+subject.
+
+Under the NDPR, and given the HR exposure the brief itself flags, **ingest-then-harden produces a
+compliance problem that cannot be retrofitted.** So `tests/test_intelligence_tracks.py` asserts
+those capabilities remain `blocked` *by name*: if someone ships GPS ingest, the build fails, and the
+failure is the conversation about consent that has to happen first.
+
+The safeguards are treated as a **schema, not a policy appendix**, and are recorded beside the
+capability rather than in a separate document nobody reads at build time: explicit consent and
+lawful basis, minimum necessary data, no inference of sensitive characteristics, explainable and
+auditable outputs, every anomaly triggering **human review rather than automatic rejection**,
+time-limited retention, and a fairness and data-protection assessment before deployment. These
+signals must never be a standalone basis for a hiring, exclusion, pay, promotion or disciplinary
+decision.
+
+### What already transfers
+
+Three existing invariants carry over unchanged, which is most of why this track is credible:
+
+- **"Absent is not zero."** `_exposure_term` returns 0 for *unknown* rather than treating unknown as
+  zero exposure. Credit scoring is precisely where a fabricated input causes harm.
+- **Confidence gates severity** (`CONFIDENCE_ESCALATION_FLOOR`). Maps directly onto the brief's
+  requirement that any anomaly triggers human review rather than automatic rejection.
+- **`ScoreDriver`** already gives exact per-input attribution — `weight * value`, bookkeeping rather
+  than a SHAP estimate. That IS the explainability a regulated lender must show a declined applicant.
+
+And one must **not** transfer, more strictly than it does today: the `app.search` → advisory
+firewall. A credit decision citing a web snippet is indefensible.
 
 ---
 

@@ -1,14 +1,15 @@
 /**
- * The three intelligence tracks SHELTER is built for.
+ * The four intelligence tracks SHELTER is built for.
  *
  * ## Why the roadmap is stated rather than implied
  *
- * Agricultural Intelligence is live; Environmental and Public Health are the next phase.
- * Showing all three without marking which is which would be a false promise — someone
- * evaluating the platform would sign up expecting flood vulnerability mapping today. But
- * hiding the other two would understate the design, which genuinely accommodates all
- * three: the same SAR flood engine underpins Track B, and the malaria cascade the Oracle
- * already computes is Track C's core signal.
+ * Agricultural Intelligence is live; Environmental, Public Health and Financial are the
+ * next phase. Showing them all without marking which is which would be a false promise —
+ * someone evaluating the platform would sign up expecting flood vulnerability mapping
+ * today. But hiding them would understate the design, which genuinely accommodates all
+ * four on one pipeline: the same SAR flood engine underpins Track B, the malaria cascade
+ * the Oracle already computes is Track C's core signal, and Track D's portfolio-exposure
+ * capability *is* the Oracle's per-area severity pointed at a loan book.
  *
  * So each card carries an explicit state badge. "Next phase" is honest in a way that
  * "coming soon" is not — it says there is a plan without implying a date.
@@ -29,7 +30,7 @@ interface Track {
   badge: string;
   lede: string;
   capabilities: string[];
-  /** A distinct glyph per track, so the three are distinguishable without reading. */
+  /** A distinct glyph per track, so they are distinguishable without reading. */
   icon: React.ReactNode;
 }
 
@@ -129,6 +130,47 @@ const TRACKS: Track[] = [
           d="M7.5 12h2l1.5-3 2 6 1.5-3h2"
           stroke="currentColor"
           strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "financial",
+    name: "Financial & Credit Risk Intelligence",
+    state: "next",
+    badge: "Next phase",
+    lede:
+      // The claim is about VERIFICATION, not about lending better. Across much of Africa the
+      // binding constraint on credit is not appetite — it is verifiable context, and someone
+      // creditworthy but unverifiable is declined for a reason that has nothing to do with them.
+      // Deliberately not "credit scoring": we do not score people, we describe places.
+      "A verified place is the missing half of a credit decision — and the same satellites already see it.",
+    capabilities: [
+      "KYC/KYB address verification",
+      "Neighbourhood commercial scoring",
+      "Lender portfolio exposure",
+      "Agent & merchant network viability",
+      "Consent-governed location evidence",
+    ],
+    icon: (
+      // A building footprint with a verification tick, not a coin or a currency glyph: this track
+      // verifies PLACES, and money iconography would imply we assess a person's finances.
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <path
+          d="M4 20V9l6-4 6 4v3"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M4 20h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M8 20v-4h3v4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" opacity="0.55" />
+        <path
+          d="M14 17.5 16 19.5 20 15"
+          stroke="currentColor"
+          strokeWidth="1.9"
           strokeLinecap="round"
           strokeLinejoin="round"
         />

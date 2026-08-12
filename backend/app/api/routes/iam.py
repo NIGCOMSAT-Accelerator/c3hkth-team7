@@ -39,6 +39,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.api import resolution
 from app.api.area_input import (
     normalise_area,
     reject_unavailable_channel,
@@ -100,7 +101,7 @@ from app.iam.roles import (
 )
 from app.logging_config import get_logger
 from app.models.enums import Channel, DeliveryMode, Severity, SubscriberKind
-from app.models.schemas import AreaOfInterest, ChannelBinding, Subscriber
+from app.models.schemas import AreaOfInterest, BBox, ChannelBinding, Subscriber
 from app.store import cache, repository
 
 log = get_logger(__name__)
@@ -934,6 +935,24 @@ class MyAccessResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class TrackCapability(BaseModel):
+    """One capability within a track, and honestly how far along it is.
+
+    Mirrors an entry of `tracks.FINANCIAL_CAPABILITIES`. Published because a lender evaluating
+    this platform needs to know which of seven things it can do today — and because a status of
+    `blocked` with a stated blocker is a stronger claim than silence.
+    """
+
+    key: str
+    label: str
+    #: `ready` | `feasible` | `partial` | `blocked`.
+    status: str
+    #: What it does, or would do. Written for a reviewer, not a developer.
+    detail: str
+    #: What stands in the way. A sentence — the blocker is the interesting part.
+    blocked_by: str
+
+
 class TrackInfo(BaseModel):
     """One intelligence track, and whether activating it delivers anything yet."""
 
@@ -948,6 +967,18 @@ class TrackInfo(BaseModel):
     #: The hazards this track alerts on. Empty for an undeliverable track — which is the
     #: machine-readable form of the same fact.
     hazards: list[str]
+
+    #: Per-capability status, for a track too broad for one flag. Empty for the others.
+    #:
+    #: Only the Financial track populates this, and it is why the field exists: a single
+    #: "next phase" label on eight distinct capabilities is less credible than a list that is
+    #: defensible line by line — and less useful, because the sequencing argument is in the gaps.
+    #:
+    #: `status` is one of `ready` (measurable today, needs a surface), `feasible` (small known
+    #: addition), `partial` (answers some of the question), `blocked` (waiting on a decision or on
+    #: data verified absent). `blocked_by` is a sentence rather than a code, because *why* it is
+    #: blocked is the part a reviewer needs.
+    capabilities: list[TrackCapability] = []
 
 
 class WorkspacePublic(BaseModel):
@@ -1027,9 +1058,16 @@ def _workspace_out(doc: dict) -> WorkspacePublic:
 async def list_tracks(account: Account = Depends(current_account)) -> list[TrackInfo]:
     """The intelligence tracks a workspace can activate.
 
-    Includes `deliverable: false` for Public Health rather than omitting it. Hiding the track
-    would lose the demand signal that sequences the roadmap; showing it without the flag would
-    let an aggregator activate something that delivers nothing while reading as enabled.
+    Includes `deliverable: false` tracks rather than omitting them — Public Health and Financial
+    both. Hiding a track would lose the demand signal that sequences the roadmap; showing it
+    without the flag would let an aggregator activate something that delivers nothing while
+    reading as enabled.
+
+    **The Financial track also returns `capabilities`**, because one flag is too coarse for it:
+    of eight capabilities, two are measurable today and need only a surface, two are small known
+    additions, and two are blocked on a consent layer this platform has not built. A lender
+    evaluating the platform needs that breakdown, and a reviewer is more convinced by a list that
+    is defensible line by line than by a single "coming soon".
     """
     _require_store()
 
@@ -1044,6 +1082,14 @@ async def list_tracks(account: Account = Depends(current_account)) -> list[Track
                 notes=info["notes"],
                 deliverable=tracks_mod.TRACK_DELIVERABLE[track],
                 hazards=sorted(h.value for h in tracks_mod.TRACK_HAZARDS[track]),
+                capabilities=[
+                    TrackCapability(**c)
+                    for c in (
+                        tracks_mod.FINANCIAL_CAPABILITIES
+                        if track is tracks_mod.Track.FINANCIAL
+                        else ()
+                    )
+                ],
             )
         )
     return out
@@ -3638,6 +3684,253 @@ async def list_customer_areas(
     return subscriber.areas if subscriber else []
 
 
+class AreaResolveRequest(BaseModel):
+    """An address, and how big the plot is. Everything else is derived.
+
+    ## What is mandatory, and what is deliberately not
+
+    **`address` OR `lat`/`lon`.** One of the two, never neither — there is no sensible default for
+    "where". A partner importing a spreadsheet almost always has an address column; one with GPS
+    from a field agent has coordinates, which are strictly more accurate.
+
+    **`size` is optional and never a validation failure.** "5 hectares", "12 acres", "2 plots",
+    "medium" and blank all resolve; an unrecognised string falls back to a documented default and
+    comes back flagged `size_is_estimate`. A 422 for "about five and a bit" is a dead end for a
+    customer who answered honestly, and the response includes the resolved area so a wrong guess is
+    visible and correctable before anything is committed.
+    """
+
+    #: "15 Adeola Odeku Street, Victoria Island, Lagos", "Wuse Market, Abuja", "Argungu".
+    #:
+    #: Resolved by a prefix-capable geocoder, so street and building level work where OSM has the
+    #: data — measured, "Wuse Market, Abuja" returns the market's own 20-vertex perimeter. Where it
+    #: does not, a district name still resolves, which for rural Nigeria is the common case rather
+    #: than a failure.
+    address: str | None = Field(default=None, max_length=160)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+
+    #: How big, in words. See the class docstring — never a 422.
+    size: str | None = Field(default=None, max_length=60)
+    #: What to call the plot in every alert. Defaults to the resolved place name.
+    name: str | None = Field(default=None, max_length=120)
+    #: ISO-3166 alpha-2 bias for the lookup. "Kano" exists in several countries.
+    country_code: str | None = Field(default="ng", max_length=2)
+
+
+class AreaResolution(BaseModel):
+    """A resolved area, plus the token that commits it.
+
+    Everything here is for the caller to CHECK before committing. Nothing has been written: no
+    area exists, no scan is queued, and the customer has not been emailed.
+    """
+
+    #: Present this as `resolution_token` on `POST /customers/{account_id}/areas` to commit.
+    #:
+    #: **Null when the resolution could not be stored** (an unreachable cache). The geometry above
+    #: is still correct and the partner can commit by sending `area` directly, but the confirmation
+    #: guarantee is gone — so it is reported rather than silently omitted. See `expires_in_seconds`.
+    resolution_token: str | None
+    #: Seconds the token remains valid. Null when there is no token.
+    expires_in_seconds: int | None
+
+    #: The area exactly as it will be created. Byte-for-byte what the token pins.
+    area: dict
+
+    #: "Wuse Market, Wuse District, Abuja, Nigeria" — what we think they meant.
+    resolved_place: str | None
+    #: "about 11 football pitches". The check a person can actually perform against a map.
+    size_description: str
+    hectares: float
+    #: True when the size was guessed rather than stated. Worth surfacing to an operator.
+    size_is_estimate: bool
+
+    country: str | None
+    admin1: str | None
+    admin2: str | None
+
+    #: The resolved feature's own outline, when it had one. **Confirmation, not the geometry** —
+    #: `area.bbox` is the square derived from the stated size. See `places.ResolvedArea.place_ring`.
+    place_ring: list[list[float]] | None
+    place_ring_hectares: float | None
+    place_monitoring: dict | None
+
+    monitoring_cadence: str
+    attribution: str
+
+
+class AreaCreateRequest(AreaOfInterest):
+    """An area to monitor: either a `resolution_token`, or the geometry itself.
+
+    ## Why this subclasses `AreaOfInterest` rather than wrapping it
+
+    Backward compatibility, and it is not cosmetic. Every existing integration posts a bare
+    `AreaOfInterest` to this route. A wrapper — `{"area": {...}}` — would break all of them, and a
+    `{"area": ..., "resolution_token": ...}` union would mean two shapes for one job forever.
+
+    Subclassing keeps the old body valid **unchanged** while adding one optional field. The cost is
+    that `name` and `bbox` are declared required by the parent and are not required when a token is
+    supplied, so they are relaxed here and enforced in `_area_from_request` instead — where the
+    error can name which of the two forms is incomplete rather than emitting a field-level 422 that
+    reads as though both were mandatory.
+    """
+
+    #: From `POST /customers/{account_id}/areas/resolve`. When present, every geometry field is
+    #: ignored — the token pins what was resolved, and letting a caller override part of it would
+    #: reintroduce exactly the drift the token exists to prevent.
+    resolution_token: str | None = Field(default=None, max_length=120)
+
+    # Relaxed from the parent. See the class docstring.
+    name: str = ""
+    bbox: BBox | None = None  # type: ignore[assignment]
+
+
+async def _area_from_request(
+    payload: AreaCreateRequest, *, account: Account, aggregator: Aggregator
+) -> AreaOfInterest:
+    """The area to create, from either form. Raises `HTTPException` with an actionable message.
+
+    A token is checked against the customer AND the aggregator it was issued for, not merely
+    against its own existence — so a spreadsheet with a shifted column cannot quietly attach one
+    farmer's plot to another, which is a failure nothing downstream could detect because every
+    number would still look correct.
+    """
+    if payload.resolution_token:
+        stored = await resolution.redeem(
+            payload.resolution_token,
+            account_id=account.id,
+            aggregator_id=aggregator.account.id,
+        )
+        if stored is None:
+            # 422, not 403 or 404. Unknown, expired, already used and issued-for-another-customer
+            # are deliberately indistinguishable: the recovery is identical in every case, and
+            # distinguishing them would confirm a token existed. The message names the recovery.
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "That `resolution_token` is not valid for this customer. Tokens are single-use "
+                f"and expire after {resolution.TTL_SECONDS // 60} minutes — call "
+                "POST /customers/{account_id}/areas/resolve again and commit the new token.",
+            )
+        # `name` is the one field a caller may legitimately want to override after resolving: the
+        # geocoder's label is a place, and a partner often has the customer's own name for the plot
+        # ("Ibrahim north field"). Geometry is never overridable.
+        area = AreaOfInterest.model_validate(stored)
+        if payload.name:
+            area.name = payload.name
+        if payload.crop:
+            area.crop = payload.crop
+        return _normalise_area(area)
+
+    if payload.bbox is None or not payload.name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Send either `resolution_token` from POST /customers/{account_id}/areas/resolve, or "
+            "`name` and `bbox` directly.",
+        )
+
+    return _normalise_area(
+        AreaOfInterest.model_validate(
+            payload.model_dump(exclude={"resolution_token"}, exclude_none=True)
+        )
+    )
+
+
+@router.post(
+    "/customers/{account_id}/areas/resolve",
+    response_model=AreaResolution,
+)
+async def resolve_customer_area(
+    account_id: str,
+    payload: AreaResolveRequest,
+    aggregator: Aggregator = Depends(require_scope(ApiKeyScope.WRITE)),
+) -> AreaResolution:
+    """**Address → geometry, as a dry run.** Nothing is created; nothing is scanned.
+
+    ## The two-call flow, and why it is two
+
+        POST /iam/customers/{account_id}/areas/resolve   {address, size}  -> geometry + token
+        POST /iam/customers/{account_id}/areas           {resolution_token}  -> monitored + scanned
+
+    A single call that resolved *and* activated would be one fewer round trip and a materially
+    worse product. **Address resolution is the one input whose errors are silent**: a bad size is
+    caught by the measurement floor and a bad shape by ring validation, but nothing catches a
+    plausible coordinate in the wrong place. This platform has already registered a Nigerian farm
+    in **England** down that path. Splitting the call means a wrong geocode is something an
+    integration can see and reject, rather than a monitored area with a scan queued and a customer
+    already emailed about a plot that is not theirs.
+
+    The token makes the confirmation step unskippable without making it burdensome — one extra
+    field on a call the partner is already making — and it pins the geometry, so what gets
+    monitored is byte-for-byte what was shown here rather than something their code rebuilt from
+    these fields.
+
+    ## Idempotent and safe to retry
+
+    A GET would be the honest verb for a computation, and this is a POST only because the input is
+    a JSON body rather than something that belongs in a query string. Calling it twice costs two
+    geocoder lookups (usually one, given the shared cache) and yields two independent tokens.
+    Redeeming either creates one area; the other expires unused.
+
+    Requires `customers:write` — the same scope as the write it precedes, because a caller who
+    cannot create an area has no use for a token that commits one.
+    """
+    _require_store()
+
+    # Authorise BEFORE geocoding, so an unknown customer id cannot be used to run free lookups
+    # against our rate-limited upstream, and a cross-tenant probe cannot tell whether an id exists
+    # by timing. `owned_account` 404s on someone else's customer with the same message as a genuine
+    # miss.
+    account = await owned_account(account_id, aggregator)
+
+    if payload.address is None and (payload.lat is None or payload.lon is None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Send either `address` (a place, street or building name) or both `lat` and `lon`. "
+            "There is no default location.",
+        )
+
+    from app.api.routes.places import ResolveRequest, resolve
+
+    resolved = await resolve(
+        ResolveRequest(
+            place=payload.address,
+            lat=payload.lat,
+            lon=payload.lon,
+            size=payload.size,
+            name=payload.name,
+            country=payload.country_code,
+        ),
+        holder_label=f"aggregator:{aggregator.account.id}",
+        is_platform=False,
+    )
+
+    token = await resolution.issue(
+        area=resolved.area,
+        account_id=account.id,
+        aggregator_id=aggregator.account.id,
+    )
+
+    return AreaResolution(
+        resolution_token=token,
+        expires_in_seconds=resolution.TTL_SECONDS if token else None,
+        area=resolved.area,
+        resolved_place=resolved.resolved_place,
+        size_description=resolved.size_description,
+        hectares=resolved.hectares,
+        size_is_estimate=resolved.size_is_estimate,
+        country=resolved.country,
+        admin1=resolved.admin1,
+        admin2=resolved.admin2,
+        place_ring=resolved.place_ring,
+        place_ring_hectares=resolved.place_ring_hectares,
+        place_monitoring=(
+            resolved.place_monitoring.model_dump() if resolved.place_monitoring else None
+        ),
+        monitoring_cadence=resolved.monitoring_cadence,
+        attribution=resolved.attribution,
+    )
+
+
 @router.post(
     "/customers/{account_id}/areas",
     response_model=AreaOfInterest,
@@ -3645,11 +3938,22 @@ async def list_customer_areas(
 )
 async def add_customer_area(
     account_id: str,
-    payload: AreaOfInterest,
+    payload: AreaCreateRequest,
     background: BackgroundTasks,
     aggregator: Aggregator = Depends(require_scope(ApiKeyScope.WRITE)),
 ) -> AreaOfInterest:
     """Add another plot for an existing customer, and scan it immediately.
+
+    ## Two ways to send the plot
+
+        {"resolution_token": "shltres_…"}          from POST …/areas/resolve — RECOMMENDED
+        {"name": …, "bbox": {…}, "geometry": […]}  a geometry you already hold
+
+    The token path is recommended for anything driven by an address, because it commits the exact
+    geometry that was resolved and shown to you rather than one your code rebuilt from the response
+    fields. The direct path stays fully supported — a partner holding surveyed outlines has nothing
+    to resolve, and sending the true ring is strictly better than a box (the reading is masked to
+    it, so a riverside strip is not diluted by its envelope).
 
     **There is no limit on areas per customer.** A farmer with four scattered plots is the normal
     case, not an edge one, and each is assessed independently on every satellite pass.
@@ -3670,7 +3974,7 @@ async def add_customer_area(
             "add further plots here.",
         )
 
-    area = _normalise_area(payload)
+    area = await _area_from_request(payload, account=account, aggregator=aggregator)
     subscriber = await repository.get_subscriber(account.subscriber_id)
     if subscriber is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Subscription not found.")

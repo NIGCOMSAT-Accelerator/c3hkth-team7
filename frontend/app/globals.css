@@ -1207,9 +1207,90 @@ h3 {
   }
 }
 
+/* ------------------------------------------------- pipeline map -- */
+/*
+   The five-agent pipeline map, under the track cards on the dashboard.
+
+   Folded by default. A subscriber opening the dashboard wants today's risk, and a roadmap
+   that pushed that below the fold would be the wrong trade — so this is a `<details>`,
+   which costs no JavaScript and is keyboard reachable for free.
+
+   Quiet by design: hairline border, muted text, no accent fill. It explains how the next
+   phase arrives; it must not compete with the assessment above it.
+*/
+.pipemap {
+  margin-top: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.pipemap__summary {
+  /* 44px minimum: tapped with a thumb on a phone. */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.pipemap__summary:hover,
+.pipemap__summary:focus-visible {
+  color: var(--accent);
+}
+
+.pipemap__body {
+  padding: 0 16px 16px;
+}
+
+.pipemap__lede {
+  margin: 0 0 12px;
+  max-width: 70ch;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+
+.pipemap__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  max-width: 78ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.pipemap__list strong {
+  color: var(--text-primary);
+}
+
+/*
+   The consent note, set apart because it is a CONSTRAINT rather than a capability.
+
+   `--sev-advisory` (brand purple) rather than a warning colour: this is a commitment, not an
+   alert. And deliberately not a `--viz-*` series colour — those are a reserved chart palette
+   validated for colourblind separation against each other, and spending one on UI chrome is how
+   that validation stops meaning anything.
+*/
+.pipemap__note {
+  margin: 14px 0 0;
+  padding: 11px 14px;
+  max-width: 78ch;
+  border-left: 3px solid var(--sev-advisory);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-raised);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
 /* --------------------------------------------------------- tracks -- */
 /*
-   The three intelligence tracks. Agricultural is live; the other two are next phase and
+   The four intelligence tracks. Agricultural is live; the other three are next phase and
    say so explicitly — an unlabelled "coming soon" card reads as a broken link, and a
    card with no state at all reads as a false promise.
 */
@@ -1219,9 +1300,24 @@ h3 {
   gap: 16px;
 }
 
+/*
+   Two, then four. NOT `repeat(3, 1fr)` — that was right for three tracks and wrong the moment a
+   fourth arrived: the fourth card dropped to a row of its own, full width, reading as an
+   afterthought bolted on rather than a peer of the other three. Which is the opposite of the
+   claim being made, since the Financial track runs on the same pipeline.
+
+   Two columns from 860px because four across a 900px viewport gives each card ~210px, and these
+   carry a five-item capability list — too narrow to scan. Four across only above 1240px.
+*/
 @media (min-width: 860px) {
   .tracks {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1240px) {
+  .tracks {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -1389,6 +1485,23 @@ h3 {
     /* Sticky so the story stays visible while a long signup form scrolls. */
     position: sticky;
     top: 56px;
+    /* A sticky box taller than the viewport pins its TOP and clips the bottom — the last
+       thing in the panel simply becomes unreachable, with no scrollbar to hint that it is
+       there. Adding a fourth intelligence track put this within ~50px of that on a 800px
+       laptop viewport, so the ceiling is stated and the overflow is made scrollable rather
+       than left to clip silently.
+
+       `overflow-y: auto` only engages once the content genuinely exceeds the space, so on a
+       tall display nothing changes. `scrollbar-width: none` keeps the marketing panel clean —
+       the content is `aria-hidden` and duplicated on the landing page, so a hidden scrollbar
+       costs no one access to information. */
+    max-height: calc(100vh - 112px);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .authshell__story-inner::-webkit-scrollbar {
+    display: none;
   }
 
   .authshell__panel {
@@ -3430,6 +3543,71 @@ a.chip:hover {
 
 .wsform__hazards {
   font-size: 11.5px;
+}
+
+/* ---------------------------------------------------------------------------
+   Per-capability status, for a track too broad for one flag.
+
+   Only the Financial track renders these. Deliberately quiet: this sits under a switch that
+   delivers nothing yet, so it must inform without competing with the tracks that do work.
+
+   THE STATUS WORD IS ALWAYS PRESENT beside the dot. Same rule as `SeverityBadge` — colour is
+   never the only carrier of meaning, because a protan/deutan reader cannot separate the amber
+   from the green, and this is exactly the kind of list where "which of these actually works?"
+   is the entire question being asked.
+   --------------------------------------------------------------------------- */
+.wsform__caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.wsform__cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  /* A long capability label must wrap rather than push the row wide — the same flexbox overflow
+     that ran the crop list over the AOI id on the areas card. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wsform__capDot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+/* Four states, and the colours are borrowed from the SEVERITY palette rather than the reserved
+   `--viz-*` chart series: those are validated for separation against each other in a plot, and
+   spending them on UI chrome is how that validation stops meaning anything. */
+.wsform__capDot--ready {
+  background: var(--sev-advisory);
+}
+
+.wsform__capDot--feasible {
+  background: var(--sev-watch);
+}
+
+.wsform__capDot--partial {
+  background: var(--sev-warning);
+}
+
+.wsform__capDot--blocked {
+  background: var(--text-muted);
+}
+
+.wsform__capStatus {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 /*

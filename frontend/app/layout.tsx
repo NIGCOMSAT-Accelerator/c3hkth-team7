@@ -195,10 +195,16 @@ export default async function RootLayout({
                 lead to the gate anyway, so a fourth link only added a decision.
 
                 The intelligence-tracks column that used to sit beside this is also gone.
-                Three tracks with five capabilities each made the footer taller than most
-                of the pages carrying it, and the landing page and dashboard both present
-                the same material with room to do it properly. The tagline above still
-                names all three hazards, so scope is not lost.
+                Four tracks with five capabilities each would make the footer taller than
+                most of the pages carrying it, and the landing page and dashboard both
+                present the same material with room to do it properly.
+
+                The tagline above names flood, crop and health — the three HAZARD families,
+                which is deliberately not the same as the four tracks. The Financial track
+                has no hazard and should not: a credit signal is not an event to warn
+                someone about, and naming it in an early-warning tagline would misdescribe
+                both. `TRACK_HAZARDS[FINANCIAL]` is empty in the backend for the same
+                reason.
 
                 No developer column: API docs live behind the gate, because the reference
                 is only actionable with a key.

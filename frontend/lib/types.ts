@@ -907,6 +907,27 @@ export interface Track {
   notes: string;
   deliverable: boolean;
   hazards: string[];
+  /**
+   * Per-capability status, for a track too broad for one `deliverable` flag.
+   *
+   * Empty for every track but Financial, which has seven capabilities at four different stages —
+   * two measurable today and needing only a surface, two small known additions, two blocked on a
+   * consent layer that does not exist yet. Server-driven for the same reason `Track` itself is: a
+   * local copy would drift from the backend the moment one of them ships, and the drift would read
+   * as a working capability.
+   */
+  capabilities: TrackCapability[];
+}
+
+/** One capability within a track. Mirrors `TrackCapability` in `app/api/routes/iam.py`. */
+export interface TrackCapability {
+  key: string;
+  label: string;
+  /** `ready` | `feasible` | `partial` | `blocked`. Render the word, never colour alone. */
+  status: string;
+  detail: string;
+  /** What stands in the way. A sentence — the blocker is the informative part. */
+  blocked_by: string;
 }
 
 export interface Workspace {

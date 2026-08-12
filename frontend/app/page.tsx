@@ -197,7 +197,7 @@ export default async function HomePage() {
             marginBottom: 8,
           }}
         >
-          Three intelligence tracks
+          Four intelligence tracks
         </h2>
         <p
           style={{
@@ -207,12 +207,12 @@ export default async function HomePage() {
             margin: "0 0 24px",
           }}
         >
-          One platform, one satellite pipeline, three audiences. The MVP ships{" "}
+          One platform, one satellite pipeline, four audiences. The MVP ships{" "}
           <strong style={{ color: "var(--text-primary)" }}>
             Agricultural Intelligence
           </strong>{" "}
-          first — Environmental and Public Health Intelligence follow as the next
-          phase, on the same engine.
+          first — Environmental, Public Health and Financial &amp; Credit Risk
+          Intelligence follow as the next phase, on the same engine.
         </p>
         <div style={{ marginBottom: 64 }}>
           <IntelligenceTracks />

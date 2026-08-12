@@ -392,10 +392,72 @@ export default async function DashboardPage() {
           Intelligence tracks
         </h2>
         <p className="muted" style={{ fontSize: 14, margin: "0 0 20px", maxWidth: "70ch" }}>
-          Your account is on Agricultural Intelligence. Environmental and Public Health
-          Intelligence run on the same satellite pipeline and arrive in the next phase.
+          Your account is on Agricultural Intelligence. Environmental, Public Health and
+          Financial &amp; Credit Risk Intelligence run on the same satellite pipeline and
+          arrive in the next phase.
         </p>
         <IntelligenceTracks compact />
+
+        {/*
+          How the next-phase tracks reach production on the pipeline that already runs.
+
+          One argument about all four tracks rather than four separate claims, so it sits under
+          the cards instead of inside them. And it is a `<details>` because a subscriber checking
+          today's risk should not have to scroll past a roadmap to reach it — folded, keyboard
+          reachable, no JavaScript, no bundle cost on a metered connection.
+
+          The credible version of "next phase" names which EXISTING stage does the work. A roadmap
+          that cannot do that is a wish list.
+        */}
+        <details className="pipemap">
+          <summary className="pipemap__summary">
+            How the five-agent pipeline delivers the next phase
+          </summary>
+          <div className="pipemap__body">
+            <p className="pipemap__lede">
+              No new pipeline. Each next-phase track is a different question asked of the same
+              five agents.
+            </p>
+            <ul className="pipemap__list">
+              <li>
+                <strong>Scout</strong> discovers imagery per plot on a six-hour cycle, skipping
+                polls whose answer cannot have changed and backing off from a dead upstream.
+                Financial adds vector layers — building footprints, points of interest,
+                settlement extent — to the same failover chains.
+              </li>
+              <li>
+                <strong>Analyst</strong> measures, and only measures. Two trained models over
+                windowed satellite reads: flood detection at <strong>0.780</strong> IoU against
+                0.579 for the published radar threshold, crop stress at <strong>0.764</strong>{" "}
+                precision against 0.344 for a fixed vegetation cut-off.
+              </li>
+              <li>
+                <strong>Oracle</strong> is the only stage that decides severity. Its per-plot
+                score, already timelined and attributed input by input, is what a lender needs to
+                explain a decision — the same arithmetic, pointed at a loan book.
+              </li>
+              <li>
+                <strong>Herald</strong> delivers and enforces your floors: severity, the per-plot
+                score threshold, and an eighteen-hour repeat window that an escalation always
+                overrides.
+              </li>
+              <li>
+                <strong>Fahis</strong> runs backwards days later and asks whether we were right,
+                recording one of five verdicts — including &ldquo;nothing found either way&rdquo;,
+                because a flood in a remote district may never be reported. It can never alter an
+                advisory or a score. For a credit decision that firewall is the difference
+                between a model you can audit and one you cannot.
+              </li>
+            </ul>
+            <p className="pipemap__note">
+              <strong>Consent comes before any of it.</strong> Residency and business-permanence
+              timelines need location data people knowingly gave, and this platform has no consent
+              record, lawful basis, purpose limitation or retention limit yet. That layer is built
+              first — the test suite fails the build if location ingest ships without it. Rebuilding
+              trust in credit cannot start by taking data nobody agreed to give.
+            </p>
+          </div>
+        </details>
       </section>
 
     </div>

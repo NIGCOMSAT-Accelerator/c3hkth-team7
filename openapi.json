@@ -948,6 +948,118 @@
         "title": "ApiKeyScope",
         "type": "string"
       },
+      "AreaCreateRequest": {
+        "description": "An area to monitor: either a `resolution_token`, or the geometry itself.\n\n## Why this subclasses `AreaOfInterest` rather than wrapping it\n\nBackward compatibility, and it is not cosmetic. Every existing integration posts a bare\n`AreaOfInterest` to this route. A wrapper \u2014 `{\"area\": {...}}` \u2014 would break all of them, and a\n`{\"area\": ..., \"resolution_token\": ...}` union would mean two shapes for one job forever.\n\nSubclassing keeps the old body valid **unchanged** while adding one optional field. The cost is\nthat `name` and `bbox` are declared required by the parent and are not required when a token is\nsupplied, so they are relaxed here and enforced in `_area_from_request` instead \u2014 where the\nerror can name which of the two forms is incomplete rather than emitting a field-level 422 that\nreads as though both were mandatory.",
+        "properties": {
+          "admin1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "State / province",
+            "title": "Admin1"
+          },
+          "admin2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LGA / district",
+            "title": "Admin2"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BBox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country": {
+            "default": "NG",
+            "title": "Country",
+            "type": "string"
+          },
+          "crop": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dominant crop, e.g. rice",
+            "title": "Crop"
+          },
+          "delivery_mode": {
+            "$ref": "#/components/schemas/DeliveryMode",
+            "default": "direct"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exterior ring as [[lon, lat], ...] \u2014 the true field outline. Omit for a pin-and-radius area, where the bbox is the geometry.",
+            "title": "Geometry"
+          },
+          "hectares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hectares"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "resolution_token": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Token"
+          }
+        },
+        "title": "AreaCreateRequest",
+        "type": "object"
+      },
       "AreaOfInterest": {
         "description": "A monitored place \u2014 a farm, a ward, a district.\n\n## The two geometries, and why both exist\n\n`bbox` is what the imagery layer consumes: STAC `/search` takes a bbox, and a windowed\nCOG read takes a rectangle. Neither interface accepts a polygon, so the envelope is\nunavoidable at that level and is stored first-class rather than derived per read.\n\n`geometry` is the *true* outline when the subscriber drew one, and it narrows what gets\nCOUNTED inside the window. That distinction is the whole point \u2014 measured on real\nshapes:\n\n    square 1 km field    polygon 98.5 ha   envelope  98.5 ha   1.0x\n    L-shaped field       polygon 68.1 ha   envelope  98.5 ha   1.4x\n    riverside strip      polygon 72.9 ha   envelope 218.8 ha   3.0x\n\nThe strip is the shape most flood-exposed smallholdings actually have. Assessing its\nenvelope means two-thirds of the pixels feeding `inundated_fraction` are somebody else's\nland, which dilutes a real signal toward the threshold and can turn a WARNING into a\nWATCH. `app/eo/indices.py` applies the polygon as a raster mask for exactly this reason.\n\n`geometry` is OPTIONAL, and a pin-plus-radius AOI is fully supported: it produces a\nsquare whose envelope *is* its geometry, so masking is a no-op and nothing is lost.",
         "properties": {
@@ -1107,6 +1219,243 @@
           }
         },
         "title": "AreaPatch",
+        "type": "object"
+      },
+      "AreaResolution": {
+        "description": "A resolved area, plus the token that commits it.\n\nEverything here is for the caller to CHECK before committing. Nothing has been written: no\narea exists, no scan is queued, and the customer has not been emailed.",
+        "properties": {
+          "admin1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin1"
+          },
+          "admin2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin2"
+          },
+          "area": {
+            "additionalProperties": true,
+            "title": "Area",
+            "type": "object"
+          },
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "expires_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Seconds"
+          },
+          "hectares": {
+            "title": "Hectares",
+            "type": "number"
+          },
+          "monitoring_cadence": {
+            "title": "Monitoring Cadence",
+            "type": "string"
+          },
+          "place_monitoring": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Monitoring"
+          },
+          "place_ring": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Ring"
+          },
+          "place_ring_hectares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Ring Hectares"
+          },
+          "resolution_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Token"
+          },
+          "resolved_place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Place"
+          },
+          "size_description": {
+            "title": "Size Description",
+            "type": "string"
+          },
+          "size_is_estimate": {
+            "title": "Size Is Estimate",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resolution_token",
+          "expires_in_seconds",
+          "area",
+          "resolved_place",
+          "size_description",
+          "hectares",
+          "size_is_estimate",
+          "country",
+          "admin1",
+          "admin2",
+          "place_ring",
+          "place_ring_hectares",
+          "place_monitoring",
+          "monitoring_cadence",
+          "attribution"
+        ],
+        "title": "AreaResolution",
+        "type": "object"
+      },
+      "AreaResolveRequest": {
+        "description": "An address, and how big the plot is. Everything else is derived.\n\n## What is mandatory, and what is deliberately not\n\n**`address` OR `lat`/`lon`.** One of the two, never neither \u2014 there is no sensible default for\n\"where\". A partner importing a spreadsheet almost always has an address column; one with GPS\nfrom a field agent has coordinates, which are strictly more accurate.\n\n**`size` is optional and never a validation failure.** \"5 hectares\", \"12 acres\", \"2 plots\",\n\"medium\" and blank all resolve; an unrecognised string falls back to a documented default and\ncomes back flagged `size_is_estimate`. A 422 for \"about five and a bit\" is a dead end for a\ncustomer who answered honestly, and the response includes the resolved area so a wrong guess is\nvisible and correctable before anything is committed.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "maxLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "ng",
+            "title": "Country Code"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "title": "AreaResolveRequest",
         "type": "object"
       },
       "AssessmentTrack": {
@@ -2904,6 +3253,44 @@
             "title": "Monitoring Cadence",
             "type": "string"
           },
+          "place_monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonitoringNote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "place_ring": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Ring"
+          },
+          "place_ring_hectares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Ring Hectares"
+          },
           "resolved_place": {
             "anyOf": [
               {
@@ -4367,9 +4754,51 @@
         "title": "TotpEnrolment",
         "type": "object"
       },
+      "TrackCapability": {
+        "description": "One capability within a track, and honestly how far along it is.\n\nMirrors an entry of `tracks.FINANCIAL_CAPABILITIES`. Published because a lender evaluating\nthis platform needs to know which of seven things it can do today \u2014 and because a status of\n`blocked` with a stated blocker is a stronger claim than silence.",
+        "properties": {
+          "blocked_by": {
+            "title": "Blocked By",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "status",
+          "detail",
+          "blocked_by"
+        ],
+        "title": "TrackCapability",
+        "type": "object"
+      },
       "TrackInfo": {
         "description": "One intelligence track, and whether activating it delivers anything yet.",
         "properties": {
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrackCapability"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "deliverable": {
             "title": "Deliverable",
             "type": "boolean"
@@ -7000,7 +7429,7 @@
         ]
       },
       "post": {
-        "description": "Add another plot for an existing customer, and scan it immediately.\n\n**There is no limit on areas per customer.** A farmer with four scattered plots is the normal\ncase, not an edge one, and each is assessed independently on every satellite pass.\n\nScanned on creation for the same reason onboarding is: a plot added during a developing flood\nshould not wait up to six hours for the next scheduled cycle.\n\nBilling attribution is inherited from the customer's existing areas, so a new plot lands on\nthe same invoice as the rest rather than being re-derived \u2014 see `app/iam/attribution.py`.",
+        "description": "Add another plot for an existing customer, and scan it immediately.\n\n## Two ways to send the plot\n\n    {\"resolution_token\": \"shltres_\u2026\"}          from POST \u2026/areas/resolve \u2014 RECOMMENDED\n    {\"name\": \u2026, \"bbox\": {\u2026}, \"geometry\": [\u2026]}  a geometry you already hold\n\nThe token path is recommended for anything driven by an address, because it commits the exact\ngeometry that was resolved and shown to you rather than one your code rebuilt from the response\nfields. The direct path stays fully supported \u2014 a partner holding surveyed outlines has nothing\nto resolve, and sending the true ring is strictly better than a box (the reading is masked to\nit, so a riverside strip is not diluted by its envelope).\n\n**There is no limit on areas per customer.** A farmer with four scattered plots is the normal\ncase, not an edge one, and each is assessed independently on every satellite pass.\n\nScanned on creation for the same reason onboarding is: a plot added during a developing flood\nshould not wait up to six hours for the next scheduled cycle.\n\nBilling attribution is inherited from the customer's existing areas, so a new plot lands on\nthe same invoice as the rest rather than being re-derived \u2014 see `app/iam/attribution.py`.",
         "operationId": "add_customer_area_shelter_v1_api_iam_customers__account_id__areas_post",
         "parameters": [
           {
@@ -7017,7 +7446,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AreaOfInterest"
+                "$ref": "#/components/schemas/AreaCreateRequest"
               }
             }
           },
@@ -7051,6 +7480,64 @@
           }
         ],
         "summary": "Add Customer Area",
+        "tags": [
+          "iam"
+        ]
+      }
+    },
+    "/shelter/v1/api/iam/customers/{account_id}/areas/resolve": {
+      "post": {
+        "description": "**Address \u2192 geometry, as a dry run.** Nothing is created; nothing is scanned.\n\n## The two-call flow, and why it is two\n\n    POST /iam/customers/{account_id}/areas/resolve   {address, size}  -> geometry + token\n    POST /iam/customers/{account_id}/areas           {resolution_token}  -> monitored + scanned\n\nA single call that resolved *and* activated would be one fewer round trip and a materially\nworse product. **Address resolution is the one input whose errors are silent**: a bad size is\ncaught by the measurement floor and a bad shape by ring validation, but nothing catches a\nplausible coordinate in the wrong place. This platform has already registered a Nigerian farm\nin **England** down that path. Splitting the call means a wrong geocode is something an\nintegration can see and reject, rather than a monitored area with a scan queued and a customer\nalready emailed about a plot that is not theirs.\n\nThe token makes the confirmation step unskippable without making it burdensome \u2014 one extra\nfield on a call the partner is already making \u2014 and it pins the geometry, so what gets\nmonitored is byte-for-byte what was shown here rather than something their code rebuilt from\nthese fields.\n\n## Idempotent and safe to retry\n\nA GET would be the honest verb for a computation, and this is a POST only because the input is\na JSON body rather than something that belongs in a query string. Calling it twice costs two\ngeocoder lookups (usually one, given the shared cache) and yields two independent tokens.\nRedeeming either creates one area; the other expires unused.\n\nRequires `customers:write` \u2014 the same scope as the write it precedes, because a caller who\ncannot create an area has no use for a token that commits one.",
+        "operationId": "resolve_customer_area_shelter_v1_api_iam_customers__account_id__areas_resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AreaResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AreaResolution"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AggregatorApiKey": []
+          }
+        ],
+        "summary": "Resolve Customer Area",
         "tags": [
           "iam"
         ]
@@ -8391,7 +8878,7 @@
     },
     "/shelter/v1/api/iam/tracks": {
       "get": {
-        "description": "The intelligence tracks a workspace can activate.\n\nIncludes `deliverable: false` for Public Health rather than omitting it. Hiding the track\nwould lose the demand signal that sequences the roadmap; showing it without the flag would\nlet an aggregator activate something that delivers nothing while reading as enabled.",
+        "description": "The intelligence tracks a workspace can activate.\n\nIncludes `deliverable: false` tracks rather than omitting them \u2014 Public Health and Financial\nboth. Hiding a track would lose the demand signal that sequences the roadmap; showing it\nwithout the flag would let an aggregator activate something that delivers nothing while\nreading as enabled.\n\n**The Financial track also returns `capabilities`**, because one flag is too coarse for it:\nof eight capabilities, two are measurable today and need only a surface, two are small known\nadditions, and two are blocked on a consent layer this platform has not built. A lender\nevaluating the platform needs that breakdown, and a reviewer is more convinced by a list that\nis defensible line by line than by a single \"coming soon\".",
         "operationId": "list_tracks_shelter_v1_api_iam_tracks_get",
         "responses": {
           "200": {
@@ -9434,7 +9921,7 @@
     },
     "/shelter/v1/api/places/resolve": {
       "post": {
-        "description": "Turn a place and a size in words into a validated, submittable area.\n\n## Why this endpoint is the one to build a UI and an importer against\n\nEvery other way in requires the caller to construct a bbox from a centre and a radius,\nwith a cosine-latitude correction, in the right coordinate order. That is a reasonable\nask of a geospatial engineer and an unreasonable one of everybody else \u2014 and getting it\nsubtly wrong produces a monitored area that is not the field, which nothing downstream\ncan detect.\n\nSo: `{\"place\": \"Argungu\", \"size\": \"5 hectares\"}` in, a complete area out.\n\n## The resulting area is a square, deliberately\n\nA square centred on the point, sized to the stated hectares. Not a polygon, because the\ncaller has not told us the field's shape and inventing one would be fabricating data \u2014\nthe same rule the advisory generator follows about never adding a number it was not given.\n\nA subscriber who wants the true outline can draw it (the Web UI offers this) or a partner\ncan send `geometry` directly. Both then get a masked reading over the actual ring, with\npixels outside it excluded from the denominator rather than counted as unaffected \u2014 so a\nflooded riverside strip reads at its true fraction instead of being diluted by the\nsurrounding box. This endpoint is the floor, not the ceiling.",
+        "description": "Turn a place and a size in words into a validated, submittable area.\n\nA thin wrapper over `resolve(...)`, which is also what the partner route\n`POST /iam/customers/{account_id}/areas/resolve` calls. **One implementation, deliberately:**\ntwo would let the portal and an aggregator resolve the same address to different geometry, and\nnothing downstream could detect that they disagreed.\n\n## Why this endpoint is the one to build a UI and an importer against\n\nEvery other way in requires the caller to construct a bbox from a centre and a radius,\nwith a cosine-latitude correction, in the right coordinate order. That is a reasonable\nask of a geospatial engineer and an unreasonable one of everybody else \u2014 and getting it\nsubtly wrong produces a monitored area that is not the field, which nothing downstream\ncan detect.\n\nSo: `{\"place\": \"Argungu\", \"size\": \"5 hectares\"}` in, a complete area out.\n\n## The resulting area is a square, deliberately\n\nA square centred on the point, sized to the stated hectares. Not a polygon, because the\ncaller has not told us the field's shape and inventing one would be fabricating data \u2014\nthe same rule the advisory generator follows about never adding a number it was not given.\n\nA subscriber who wants the true outline can draw it (the Web UI offers this) or a partner\ncan send `geometry` directly. Both then get a masked reading over the actual ring, with\npixels outside it excluded from the denominator rather than counted as unaffected \u2014 so a\nflooded riverside strip reads at its true fraction instead of being diluted by the\nsurrounding box. This endpoint is the floor, not the ceiling.",
         "operationId": "resolve_area_shelter_v1_api_places_resolve_post",
         "requestBody": {
           "content": {

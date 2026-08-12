@@ -8,7 +8,7 @@ import IntelligenceFlow from "@/components/IntelligenceFlow";
  *
  * An auth screen is where an evaluating user decides whether to continue. A bare form
  * gives them nothing to decide with — so the left panel carries the proposition and the
- * animation that explains it, and the three intelligence tracks so a cooperative can see
+ * animation that explains it, and the four intelligence tracks so a cooperative can see
  * the roadmap before committing.
  *
  * ## Why it collapses rather than stacks on mobile
@@ -58,6 +58,19 @@ export default function AuthLayout({
             </div>
             <div className="authshell__track" data-state="next">
               <span className="authshell__track-name">Public Health Intelligence</span>
+              <span className="authshell__track-state">Next phase</span>
+            </div>
+            {/*
+              Four rows now, and this list stays FLAT rather than gaining the capability
+              detail the landing page carries. An auth panel is a decision aid, not a
+              product tour — a visitor is deciding whether to continue, and the roadmap is
+              worth one line each. The full per-capability breakdown lives on the landing
+              page and, for the Financial track, comes from the API on /portal/workspace.
+            */}
+            <div className="authshell__track" data-state="next">
+              <span className="authshell__track-name">
+                Financial &amp; Credit Risk Intelligence
+              </span>
               <span className="authshell__track-state">Next phase</span>
             </div>
           </div>

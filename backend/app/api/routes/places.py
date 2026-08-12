@@ -695,6 +695,26 @@ class ResolvedArea(BaseModel):
     #: than "continuously" — Sentinel-1 revisits every ~6 days and Sentinel-2 every ~5.
     monitoring_cadence: str
 
+    #: The resolved feature's **own outline**, when the place had one — a closed `[[lon, lat], …]`
+    #: ring. The market's perimeter, the compound's walls.
+    #:
+    #: **Informational, and not what `area` contains.** `area.bbox` is still the square derived from
+    #: the stated size, because the caller told us how big the plot is and not what shape it is —
+    #: inventing a shape would be fabricating data. This field exists so a partner can *confirm* we
+    #: found the right feature: a square around a coordinate looks identical whether we resolved
+    #: their customer's market or one a kilometre away sharing its name.
+    #:
+    #: Null is the common case. Streets are lines and most Nigerian villages are single nodes.
+    place_ring: list[list[float]] | None = None
+    #: True area of `place_ring` in hectares. Null when there is no ring.
+    place_ring_hectares: float | None = None
+    #: What the pipeline could do with `place_ring` if it were submitted as the geometry.
+    #:
+    #: Present whenever a ring is. Reports the measurement floor honestly rather than as a refusal:
+    #: a building footprint is a fraction of a hectare against a 0.5 ha floor, so the answer is
+    #: "located exactly, monitored slightly wider" — see `human.MonitoringNote`.
+    place_monitoring: MonitoringNote | None = None
+
     attribution: str
 
 
@@ -704,6 +724,11 @@ async def resolve_area(
     holder: KeyHolder = Depends(current_key_holder),
 ) -> ResolvedArea:
     """Turn a place and a size in words into a validated, submittable area.
+
+    A thin wrapper over `resolve(...)`, which is also what the partner route
+    `POST /iam/customers/{account_id}/areas/resolve` calls. **One implementation, deliberately:**
+    two would let the portal and an aggregator resolve the same address to different geometry, and
+    nothing downstream could detect that they disagreed.
 
     ## Why this endpoint is the one to build a UI and an importer against
 
@@ -727,8 +752,22 @@ async def resolve_area(
     flooded riverside strip reads at its true fraction instead of being diluted by the
     surrounding box. This endpoint is the floor, not the ceiling.
     """
+    return await resolve(payload, holder_label=holder.label, is_platform=holder.is_platform)
+
+
+async def resolve(
+    payload: ResolveRequest, *, holder_label: str, is_platform: bool
+) -> ResolvedArea:
+    """The shared implementation. Raises `HTTPException` exactly as the route does.
+
+    Split out so the partner API can offer address resolution without duplicating any of the
+    geocoding, size parsing, clamping or GRID3 admin enrichment below — see the note on the route.
+    """
     # ---- where ---- #
     place = None
+    # Which path resolved the place. Load-bearing further down: only a forward geocode identifies
+    # the FEATURE the caller named — a reverse lookup returns the enclosing administrative area.
+    by_place = payload.lat is None or payload.lon is None
     if payload.lat is not None and payload.lon is not None:
         lat, lon = payload.lat, payload.lon
         # Reverse-geocode for the label and admin fields. Best-effort: an unnamed point is
@@ -764,8 +803,8 @@ async def resolve_area(
     log.info(
         "place resolved",
         extra={
-            "holder": holder.label,
-            "is_platform": holder.is_platform,
+            "holder": holder_label,
+            "is_platform": is_platform,
             "hectares": round(size.hectares, 2),
             "by_place": payload.place is not None,
         },
@@ -819,6 +858,23 @@ async def resolve_area(
         "hectares": round(geometry.area_hectares(bbox), 2),
     }
 
+    # `by_place` rather than `place is not None`: both paths populate `place`, but only a forward
+    # geocode resolved the FEATURE the caller named. See the note on `place_ring` below.
+    ring = place.ring if (place is not None and by_place) else None
+    ring_hectares = place.ring_hectares if (place is not None and by_place) else None
+    ring_note = (
+        MonitoringNote(
+            **vars(
+                human.monitoring_note(
+                    ring_hectares,
+                    label=place.label.split(",")[0].strip() or "that outline",
+                )
+            )
+        )
+        if ring is not None and place is not None
+        else None
+    )
+
     return ResolvedArea(
         area=area,
         resolved_place=place.label if place else None,
@@ -835,5 +891,20 @@ async def resolve_area(
             "Checked on every satellite pass — usually every 5 to 6 days, and radar sees "
             "through cloud so monitoring continues during a storm."
         ),
+        # Carried through from the geocoder so a caller can confirm WHICH feature matched, without
+        # a second round trip to `/places/search`.
+        #
+        # **Only on the by-place path**, and this is not a simplification — it is a correctness
+        # requirement found by checking. `places.reverse` (the lat/lon path) returns the enclosing
+        # ADMINISTRATIVE AREA, not the feature at the point: measured at 6.9312, 3.4021 it returns
+        # "Obafemi Owode, Ogun State" with a **206-vertex LGA boundary**. Passing that through as
+        # `place_ring` would hand a partner a district outline labelled as their customer's plot —
+        # far worse than no ring, because it looks like precision.
+        #
+        # A caller who sent coordinates already knows where they pointed, so there is nothing to
+        # confirm anyway.
+        place_ring=ring,
+        place_ring_hectares=ring_hectares,
+        place_monitoring=ring_note,
         attribution=places.ATTRIBUTION,
     )

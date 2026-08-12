@@ -84,7 +84,11 @@ export const INTELLIGENCE: Record<Severity, IntelligenceCategory> = {
 };
 
 /** Which intelligence track a hazard belongs to. Mirrors `backend/app/iam/tracks.py`. */
-export type Track = "agricultural" | "environmental" | "public_health";
+export type Track =
+  | "agricultural"
+  | "environmental"
+  | "public_health"
+  | "financial";
 
 export const HAZARD_TRACK: Record<HazardType, Track> = {
   crop_waterlogging: "agricultural",
@@ -95,6 +99,10 @@ export const HAZARD_TRACK: Record<HazardType, Track> = {
   // Cascade-only today: `_classify` never returns it as a primary hazard, so it appears as a
   // consequence of a flood or waterlogging alert rather than on its own.
   malaria_risk: "public_health",
+  // NOTE: `financial` appears in `Track` but in no entry here, and that is correct rather than an
+  // omission. `HAZARD_TRACK` maps a hazard to its track, and the Financial track has no hazards —
+  // a credit signal is not an event to warn someone about. `TRACK_HAZARDS[FINANCIAL]` is likewise
+  // empty on the backend. If a hazard is ever added for it, add the mapping here too.
 };
 
 export const TRACK_META: Record<
@@ -122,6 +130,18 @@ export const TRACK_META: Record<
     short: "Public health",
     scope:
       "Malaria environmental risk, standing-water detection, community health alerts and climate-health monitoring.",
+    status: "next",
+  },
+  financial: {
+    label: "Financial & Credit Risk Intelligence",
+    short: "Financial",
+    scope:
+      "Geospatial KYC/KYB address verification, neighbourhood commercial and demographic risk scoring, asset and activity validation, and lender portfolio exposure.",
+    // `next`, and the per-capability detail comes from the SERVER (`Track.capabilities` on
+    // `GET /iam/tracks`) rather than being restated here. Seven capabilities at four different
+    // stages cannot be reduced to one label, and a TypeScript copy of that breakdown would drift
+    // from the backend the moment one of them ships — which is the same reason `Track` itself is a
+    // server-driven interface in `lib/types.ts` rather than a hardcoded table.
     status: "next",
   },
 };

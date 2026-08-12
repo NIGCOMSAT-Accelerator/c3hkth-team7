@@ -45,6 +45,7 @@ class Track(str, Enum):
     AGRICULTURAL = "agricultural"
     ENVIRONMENTAL = "environmental"
     PUBLIC_HEALTH = "public_health"
+    FINANCIAL = "financial"
 
 
 #: Primary hazards each track delivers.
@@ -66,6 +67,17 @@ TRACK_HAZARDS: dict[Track, frozenset[HazardType]] = {
     # Empty, and that is the point. `malaria_risk` is cascade-only — `_classify` never returns
     # it — so this track has no primary hazard to alert on.
     Track.PUBLIC_HEALTH: frozenset(),
+    # Empty for a DIFFERENT reason from Public Health, and the difference matters.
+    #
+    # Public Health has a hazard (`malaria_risk`) that `_classify` does not yet return. Financial
+    # has no hazard at all, and should not: a credit signal is not a hazard. Nothing about a
+    # neighbourhood's commercial density is an *event* to warn a farmer about, and modelling it as
+    # one would put a wealth proxy into the same pipeline that sends flood warnings.
+    #
+    # What this track will deliver is a **score with attribution**, on request, for a place a
+    # lender named — closer to `POST /risk/assess` than to the watch loop. So an empty hazard set
+    # here is the correct long-term state, not a gap waiting to be filled.
+    Track.FINANCIAL: frozenset(),
 }
 
 
@@ -78,6 +90,7 @@ TRACK_DELIVERABLE: dict[Track, bool] = {
     Track.AGRICULTURAL: True,
     Track.ENVIRONMENTAL: True,
     Track.PUBLIC_HEALTH: False,
+    Track.FINANCIAL: False,
 }
 
 
@@ -121,7 +134,192 @@ TRACK_INFO: dict[Track, dict[str, str]] = {
             "is what sequences the work."
         ),
     },
+    Track.FINANCIAL: {
+        "label": "Financial & Credit Risk Intelligence",
+        "summary": (
+            "Geospatial KYC/KYB and PoS terminal anchor verification, neighbourhood commercial "
+            "and demographic risk scoring, asset and activity validation, and lender portfolio "
+            "exposure — from the same satellite pipeline."
+        ),
+        "notes": (
+            "NOT YET DELIVERABLE, and it is the track where saying so matters most: a credit "
+            "decision that declines someone is harder to appeal than a flood alert that did not "
+            "arrive. Activating this records interest and changes what you receive not at all.\n\n"
+            "Two capabilities are already close. Portfolio exposure monitoring IS the existing "
+            "Oracle — severity per area, scored, timelined and verified — pointed at a loan book "
+            "instead of a farm. Neighbourhood scoring runs on WorldPop, WorldCover built-up "
+            "fraction and Copernicus DEM, all wired today. Both need a lender-facing surface "
+            "rather than new science.\n\n"
+            "Two are genuinely missing. Address verification can answer 'inside a mapped "
+            "settlement, near a road, in a built-up cell' but cannot yet answer 'is this the "
+            "declared building' — that needs building footprints, and Overture's African address "
+            "layer is empty (measured: 39 countries, none African). Residency and mobility "
+            "timelines need consented GPS, and there is NO CONSENT PRIMITIVE in this platform "
+            "yet — no consent record, no lawful basis, no purpose limitation, no per-subject "
+            "retention. That layer is built FIRST, before any location stream is ingested; "
+            "ingest-then-harden produces a compliance problem that cannot be retrofitted.\n\n"
+            "One limit is physical and will not move: MIN_AOI_HECTARES is 0.5 ha because below "
+            "~50 Sentinel pixels a fraction is edge noise. A typical urban plot is 0.02-0.05 ha, "
+            "so 'verify this house' is not a pixel measurement — it is a vector and contextual "
+            "question, which is why this track relocates to footprints, POI and settlement data "
+            "rather than forcing the imagery pipeline to produce a precise-looking number that "
+            "means nothing."
+        ),
+    },
 }
+
+
+#: Per-capability status for the Financial track, in the order a lender would ask about them.
+#:
+#: ## Why this exists rather than one "coming soon" flag
+#:
+#: Following the same honesty rule as `TRACK_DELIVERABLE`, one step finer. A single "next phase"
+#: label on a track this broad is less credible to a reviewer than a list that is defensible line
+#: by line — and it is also less useful to us, because the sequencing argument lives in the gaps.
+#:
+#: `blocked_by` is deliberately a sentence rather than a code. The blocker is the interesting part:
+#: three of these are waiting on a *decision* (a consent model, a lender surface) and two on data
+#: that has been checked and found absent, which are very different kinds of "not yet".
+FINANCIAL_CAPABILITIES: tuple[dict[str, str], ...] = (
+    {
+        "key": "portfolio_exposure",
+        "label": "Lender portfolio exposure",
+        "status": "ready",
+        "detail": (
+            "Loan exposure mapped against flood risk, agricultural stress and settlement "
+            "context. This IS the existing Oracle: severity per area, already scored, already "
+            "timelined in `assessments`, already verified by Fahis."
+        ),
+        "blocked_by": "A lender-facing surface. No new measurement is required.",
+    },
+    {
+        "key": "neighbourhood_scoring",
+        "label": "Neighbourhood demographic & commercial scoring",
+        "status": "ready",
+        "detail": (
+            "Population density (WorldPop 100 m), built-up fraction (ESA WorldCover), terrain "
+            "(Copernicus DEM), and POI/commercial density (Overture `places` — 53,865 records "
+            "measured over a Lagos bbox)."
+        ),
+        "blocked_by": (
+            "Composition and weighting. Every input is wired; none is yet combined into a score "
+            "a lender could act on — and that combination is the part that needs review, not the "
+            "plumbing."
+        ),
+    },
+    {
+        "key": "agent_merchant_network",
+        "label": "Agent, merchant & MSME network intelligence",
+        "status": "feasible",
+        "detail": (
+            "Agent viability and merchant catchment from POI density, WorldPop catchment and "
+            "road proximity."
+        ),
+        "blocked_by": (
+            "Two more Overpass queries. `eo/exposure.py` runs exactly two today (`place` and "
+            "`amenity`), so `shop=*`, `office=*` and `highway=*` are cheap additions on the same "
+            "helper — the fastest credibility win in this track."
+        ),
+    },
+    {
+        "key": "pos_terminal_anchor",
+        "label": "PoS terminal anchor verification (CBN geo-fencing)",
+        "status": "feasible",
+        "detail": (
+            "Verify that a PoS agent's REGISTERED business address is real and a plausible place "
+            "of trade: does it resolve to a mapped feature, is the 70 m disc built-up rather than "
+            "water or cropland, is there commercial activity in the catchment, and is it near a "
+            "road. Returned with per-input attribution so a declined registration can be "
+            "explained and challenged.\n\n"
+            "THE 70 M RADIUS IS WHAT MAKES THIS MEASURABLE, and the arithmetic is the whole "
+            "reason this capability is `feasible` rather than blocked. The CBN's original 10 m "
+            "geofence is a disc of 314 m2 = 0.0314 ha, about THREE Sentinel pixels — far below "
+            "MIN_AOI_HECTARES and therefore unmeasurable, edge noise by definition. The radius "
+            "relaxed to 70 m after operator feedback gives 15,394 m2 = 1.5394 ha, about 153 "
+            "pixels, comfortably above the 0.5 ha floor. A regulatory concession made for "
+            "practical reasons is what moved this from impossible to buildable."
+        ),
+        "blocked_by": (
+            "A surface and a scoring composition; every input is already wired (WorldCover "
+            "built-up fraction, Overture POI density, Overpass road proximity, and "
+            "/places/resolve for the address itself).\n\n"
+            "SCOPE LIMIT, stated because overclaiming here is a regulatory risk for the "
+            "operator rather than for us: this verifies the ANCHOR, not the transaction. The "
+            "directive requires the terminal to transmit dual-frequency GPS at transaction time "
+            "and the PSP's switch to flag, decline or disable outside the radius — that is "
+            "hardware we do not make and a payment path we must not sit in. The live "
+            "within-radius check is a haversine any PSP writes themselves.\n\n"
+            "What nobody else answers at national scale is whether the anchor is genuine: "
+            "geofencing a terminal against a FAKE address enforces nothing, because the terminal "
+            "sits happily within 70 m of a coordinate in the middle of a swamp. Ghost and cloned "
+            "terminals are the stated reason for the directive, so the anchor is the gap. "
+            "Enforcement begins 2026-08-01."
+        ),
+    },
+    {
+        "key": "kyc_kyb_address",
+        "label": "KYC/KYB address verification",
+        "status": "partial",
+        "detail": (
+            "Can answer today: is this point inside a mapped settlement, near a road, in a "
+            "built-up cell, and does the declared place resolve to a real feature with an "
+            "outline (`/places/resolve` returns the footprint and its true area)."
+        ),
+        "blocked_by": (
+            "Cannot yet answer 'is this the declared building'. Needs building footprints — "
+            "Microsoft `ms-buildings` (Parquet, has `meanHeight`) is reachable and unbuilt. "
+            "Overture's address layer does NOT help: measured, it covers 39 countries and none "
+            "of them are in Africa."
+        ),
+    },
+    {
+        "key": "fraud_synthetic_location",
+        "label": "Fraud & synthetic-location detection",
+        "status": "partial",
+        "detail": (
+            "Settlement, road and land-use cross-checks are feasible now — a declared shop in "
+            "the middle of unmapped scrub is detectable with data already ingested."
+        ),
+        "blocked_by": (
+            "Impossible-movement and duplicate-agent-cluster detection need consented GPS. See "
+            "`residency_timeline`; the same consent layer gates both."
+        ),
+    },
+    {
+        "key": "residency_timeline",
+        "label": "Residency & business-permanence timelines",
+        "status": "blocked",
+        "detail": (
+            "Consented GPS streams, check-ins or field-visit records turned into a location-"
+            "consistency timeline."
+        ),
+        "blocked_by": (
+            "THE CONSENT LAYER, which does not exist. Verified: no consent record, no lawful-"
+            "basis field, no purpose limitation, no per-subject retention anywhere in this "
+            "codebase. The nearest machinery is `audit.py`'s `expires_at` TTL index — right "
+            "bones, wrong subject. Under the NDPR this is built before ingest, not after."
+        ),
+    },
+    {
+        "key": "hr_background_support",
+        "label": "HR-tech background-verification support",
+        "status": "blocked",
+        "detail": (
+            "Complementary address-consistency checks for hiring workflows, where lawful and "
+            "candidate-consented."
+        ),
+        "blocked_by": (
+            "The consent layer, plus a governance decision this platform has not made. The "
+            "safeguards are not optional extras: explicit consent, minimum necessary data, no "
+            "inference of sensitive characteristics, explainable and challengeable outputs, "
+            "human review of every anomaly, time-limited retention, and a fairness and "
+            "data-protection assessment before deployment. These signals must never be a "
+            "standalone basis for a hiring, exclusion, pay or disciplinary decision. Listed here "
+            "so the constraint is recorded with the capability rather than in a separate document "
+            "nobody reads at build time."
+        ),
+    },
+)
 
 
 #: What a workspace gets when it is first created.

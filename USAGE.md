@@ -134,6 +134,52 @@ Nothing crashes when a credential is absent. Each gap has a documented fallback:
 | `backend/data/city.mmdb` | The portal shows raw IPs instead of cities. Also gitignored-but-baked |
 | `SEARCH_PROVIDER` | Fahis records `NOT_ATTEMPTED` — an outage, explicitly not a finding |
 | `BREVO_API_KEY` / SMTP | Email dispatch returns a `SKIPPED` receipt. Nothing raises |
+| `PHOTON_URL` | **Address type-ahead is off.** The area picker keeps its debounced full-text search, and `GET /places/suggest` returns `available: false` so a client can tell "not deployed" from "no matches". Address search itself still works — that is Nominatim, which is keyless and always on |
+| `duckdb` / `OVERTURE_RELEASE_URL` | No POI or commercial-density signal. `vector.available()` is false; nothing in the hazard path depends on it |
+| `MALARIA_ATLAS_ENABLED=false` | The malaria cascade is **not asserted** rather than asserted as absent. Set this while MAP's GeoServer is down — it has been returning 504 for every request, including the ones its own portal makes |
+
+### 2.3.1 Optional: address type-ahead with a self-hosted Photon
+
+**Skip this to review the platform.** Everything works without it; you get address *search* but not
+address *completion*. Read §3.2.1 of the README for why the two are different engines.
+
+If you want the type-ahead:
+
+```bash
+# In .env — any reachable Photon instance
+PHOTON_URL=https://photon.example.org
+PHOTON_COUNTRIES=ng            # hard country filter; comma-separated for several
+
+docker compose up -d --force-recreate api        # no rebuild needed
+curl -s "$B/places/suggest?q=Wuse+Mark" -H "X-SHELTER-API-Key: $PK"
+```
+
+**There is deliberately no Photon service in `docker-compose.yml`**, for the same reason there is no
+SearXNG: it needs an OSM index it builds or downloads itself — gigabytes for a Nigeria extract, plus
+an Elasticsearch process — and `docker compose up` silently pulling that would be a poor trade for a
+convenience on one form field. Run it yourself:
+
+```bash
+docker run -d --name photon -p 2322:2322 \
+  -v photon-data:/photon/photon_data \
+  ghcr.io/komoot/photon:latest
+# First start downloads and extracts the index. Budget disk and time.
+# Then: PHOTON_URL=http://host.docker.internal:2322
+```
+
+**Do not point at the public instance.** `photon.komoot.io` measured **23 seconds** for a single
+query — behind a keystroke that is not slow, it is broken. A self-hosted instance answers in
+~0.25 s.
+
+One trap worth knowing, because it cost a deployment: put it behind a proxy with a **real
+certificate and a router that matches the host**. A Traefik instance with no matching router serves
+its default self-signed cert and a 404; `httpx` then fails certificate verification, and the adapter
+logs that at DEBUG (one line per keystroke would drown the log), so the symptom is simply no
+suggestions and nothing obvious to read. Check with:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "$PHOTON_URL/api?q=Argungu&limit=1"   # expect 200
+```
 
 ### 2.4 The settings you must set before a public deploy
 
@@ -837,7 +883,7 @@ and both produce the same records.
 https://shelter-api.zerorate.io/dev-docs          (or /shelter/v1/api/dev-docs)
 ```
 
-ReDoc, rendered from the **filtered** spec: 29 paths, every one of them reachable with an
+ReDoc, rendered from the **filtered** spec: 31 paths, every one of them reachable with an
 aggregator key. It is deliberately not `/docs` — that describes the whole service, operator
 endpoints included, so a partner reading it finds routes their key can never call. Every field,
 and what each optional one changes downstream, is documented on the operation itself.
@@ -901,6 +947,179 @@ curl -s "$B/iam/customers" -H "X-SHELTER-API-Key: $PK"
 curl -s "$B/iam/customers/{account_id}/areas" -H "X-SHELTER-API-Key: $PK"
 curl -s "$B/alerts" -H "X-SHELTER-API-Key: $PK"
 ```
+
+### 7.3.1 Adding a plot from an address — the two-call flow
+
+Most integrations have an **address**, not a bounding box. Two calls turn one into a monitored
+area, and the split is deliberate.
+
+**Call 1 — resolve. Nothing is created.**
+
+```bash
+curl -s -X POST "$B/iam/customers/$CUSTOMER/areas/resolve" \
+  -H "X-SHELTER-API-Key: $PK" -H 'Content-Type: application/json' \
+  -d '{"address":"Wuse Market, Abuja","size":"8 hectares","country_code":"ng"}'
+```
+
+```json
+{
+  "resolution_token": "shltres_l-Yx9Y_YHNAu1-7jDl…",
+  "expires_in_seconds": 600,
+  "area": { "name": "Wuse Market", "bbox": { "west": 7.4638, "…": "…" }, "hectares": 8.0 },
+  "resolved_place": "Wuse Market, Wuse Market Road, Wuse, Abuja, Federal Capital Territory, Nigeria",
+  "size_description": "about 11 football pitches",
+  "hectares": 8.0,
+  "size_is_estimate": false,
+  "admin1": "Federal Capital Territory", "admin2": "Municipal Area Council",
+  "place_ring": [[7.4642, 9.0673], "… 20 vertices …"],
+  "place_ring_hectares": 7.7414,
+  "place_monitoring": {
+    "outline_is_monitorable": true,
+    "monitored_hectares": 7.7414,
+    "note": "We will monitor Wuse Market exactly as mapped — about 11 football pitches.",
+    "enlarged": false
+  },
+  "attribution": "© OpenStreetMap contributors"
+}
+```
+
+**Check three things before committing.** `resolved_place` — is that the right place?
+`place_ring` — the feature's *own* outline, so you can confirm we found your customer's market and
+not one a kilometre away sharing its name. `place_monitoring.note` — a sentence written for an end
+user; display it verbatim.
+
+**Call 2 — commit. This creates the area, queues a scan and emails the customer.**
+
+```bash
+curl -s -X POST "$B/iam/customers/$CUSTOMER/areas" \
+  -H "X-SHELTER-API-Key: $PK" -H 'Content-Type: application/json' \
+  -d '{"resolution_token":"shltres_l-Yx9Y_YHNAu1-7jDl…","name":"Ibrahim north field","crop":"rice"}'
+```
+
+`name` and `crop` may be overridden — the geocoder's label is a *place*, and you usually have the
+customer's own name for the plot. **Geometry cannot be overridden**: the token pins exactly what
+was resolved and shown to you.
+
+#### Why this is two calls and not one
+
+A single call would be one fewer round trip and a materially worse product. **Address resolution is
+the one input whose errors are silent**: a bad size is caught by the measurement floor, a bad shape
+by ring validation, but nothing catches a *plausible* coordinate in the wrong place. This platform
+has already registered a Nigerian farm in **England** down that path. Splitting the call means a
+wrong geocode is something your integration can see and reject, rather than a monitored area with a
+scan queued and your customer already emailed about a plot that is not theirs.
+
+The token also guarantees the committed geometry is byte-for-byte what was resolved, rather than
+something your code rebuilt from the response fields — a shifted spreadsheet column cannot quietly
+attach one farmer's plot to another.
+
+#### The rules, so you can code against them
+
+| | |
+|---|---|
+| Scope | `customers:write` on both calls |
+| Token lifetime | **10 minutes**, **single use**. Bound to that customer *and* your aggregator |
+| Invalid token | **422** naming the recovery — resolve again. Unknown, expired, reused and wrong-customer are deliberately indistinguishable |
+| `resolution_token: null` | The cache was unreachable. The geometry is still correct; commit by sending `area` directly, but you lose the confirmation guarantee |
+| Retrying `resolve` | Safe. Two tokens, either commits once, the other expires unused |
+| Sending geometry directly | **Still fully supported.** `{"name":…,"bbox":{…},"geometry":[…]}` — the pre-existing form is unchanged |
+
+**If you already hold surveyed outlines, send them.** Pass `geometry` as a ring and the reading is
+masked to it, with pixels outside excluded from the denominator rather than counted as unaffected —
+so a flooded riverside strip reads at its true fraction instead of being diluted by its bounding
+box. Resolution is the floor, not the ceiling.
+
+#### Address completion for your own UI
+
+If you are building an operator screen, `GET /places/suggest?q=Wuse+Mark` returns prefix matches
+(label + disambiguating context, no geometry). **Check `available` before showing "no matches"** —
+it is `false` when the deployment runs no Photon instance, and an empty list means the same thing
+either way. Rate limited per credential and far above interactive typing; for bulk address
+resolution use the resolve endpoint above, which is cached and intended for it.
+
+### 7.3.2 Which intelligence tracks you can activate — and which deliver anything
+
+```bash
+curl -s "$B/iam/tracks" -H "Cookie: <portal session>"     # or from the portal: /portal/workspace
+```
+
+Four tracks. **Two deliver alerts today; two record interest and change nothing you receive** — and
+the API says which, rather than leaving you to discover it over a season:
+
+| Track | `deliverable` | Alerts on |
+|---|---|---|
+| Agricultural Intelligence | `true` | crop waterlogging, drought stress, vegetation anomaly |
+| Environmental Intelligence | `true` | flood inundation, 7-day flood forecast |
+| Public Health Intelligence | `false` | nothing — `malaria_risk` is cascade-only, never a primary hazard |
+| **Financial & Credit Risk Intelligence** | `false` | nothing yet — see `capabilities` below |
+
+An undeliverable track is **offered rather than hidden**, because the activation is a useful demand
+signal and hiding it would lose that. What must not happen is a switch that reads as enabled and
+delivers silence, so `deliverable: false` and the `notes` field both say so, and the portal renders
+the caveat inline under the switch.
+
+#### The Financial track returns a per-capability breakdown
+
+One flag is too coarse for eight capabilities at four different stages, so this track alone
+populates `capabilities`:
+
+```json
+{
+  "value": "financial",
+  "deliverable": false,
+  "hazards": [],
+  "capabilities": [
+    { "key": "portfolio_exposure", "status": "ready",
+      "blocked_by": "A lender-facing surface. No new measurement is required." },
+    { "key": "neighbourhood_scoring", "status": "ready", "blocked_by": "Composition and weighting…" },
+    { "key": "agent_merchant_network", "status": "feasible", "blocked_by": "Two more Overpass queries…" },
+    { "key": "pos_terminal_anchor", "status": "feasible", "blocked_by": "A surface and a scoring composition… verifies the ANCHOR, not the transaction." },
+    { "key": "kyc_kyb_address", "status": "partial", "blocked_by": "Cannot yet answer 'is this the declared building'…" },
+    { "key": "fraud_synthetic_location", "status": "partial", "blocked_by": "…need consented GPS." },
+    { "key": "residency_timeline", "status": "blocked", "blocked_by": "THE CONSENT LAYER, which does not exist…" },
+    { "key": "hr_background_support", "status": "blocked", "blocked_by": "The consent layer, plus a governance decision…" }
+  ]
+}
+```
+
+`status` is one of:
+
+| | |
+|---|---|
+| `ready` | Measurable with data already wired. Needs a lender-facing surface, not new science |
+| `feasible` | A small, known addition — named in `blocked_by` |
+| `partial` | Answers part of the question today; the missing part is stated |
+| `blocked` | Waiting on a decision, or on data verified absent |
+
+#### If you operate PoS terminals: what `pos_terminal_anchor` is for
+
+The CBN requires every terminal to be geo-fenced to its registered business address, enforced from
+**1 August 2026**, within a **70 m** radius (relaxed from 10 m after operator feedback).
+
+**We verify the anchor, not the transaction.** Your terminal transmits GPS and your PSP's switch
+decides whether to flag or decline — that is hardware and a payment path we are deliberately not in,
+and the within-radius check itself is a haversine you can write in an afternoon.
+
+What this capability will answer is the question the geo-fence cannot: **is the registered address
+real, and is it a plausible place of trade?** Geo-fencing a terminal against a fake address enforces
+nothing — ghost and cloned terminals are the stated reason for the directive, so the anchor is the
+gap. From data already wired: does the address resolve to a mapped feature, is the 70 m disc built-up
+rather than water or farmland, is there commercial activity in the catchment, and is it near a road —
+each returned with per-input attribution so a declined registration can be explained and challenged.
+
+Useful arithmetic if you are assessing feasibility yourself: a 70 m disc is 1.54 ha, about 153
+Sentinel pixels. The original 10 m disc was 0.031 ha — roughly **three** pixels, below the platform's
+0.5 ha measurement floor and therefore unmeasurable. The radius change is what made this possible.
+
+There is deliberately **no `live` status**. The whole track is `deliverable: false`, and a capability
+that claimed otherwise would contradict it with nothing to catch the disagreement — asserted in
+`tests/test_intelligence_tracks.py`.
+
+**Two capabilities are blocked on consent, and that is a hard gate.** Residency timelines and
+HR-tech support need consented location streams; there is no consent record, lawful-basis field,
+purpose limitation or per-subject retention in this platform. Under the NDPR that layer is built
+before any ingest, so the test suite asserts both remain `blocked` by name — shipping GPS ingest
+fails the build on purpose. Read README §6.5 before planning against them.
 
 ### 7.4 Webhooks — required for asynchronous delivery
 

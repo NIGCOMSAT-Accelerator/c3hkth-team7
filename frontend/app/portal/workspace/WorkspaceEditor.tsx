@@ -104,6 +104,33 @@ function TrackChoices({
                   interest and changes nothing you receive.
                 </span>
               )}
+
+              {/*
+                Per-capability status, when the server sends it.
+
+                Only the Financial track does today, and that is why this renders from the payload
+                rather than from a local table: seven capabilities at four different stages cannot
+                be reduced to the one "not delivering yet" chip above, and a TypeScript copy of the
+                breakdown would drift from the backend the moment one of them ships.
+
+                Shown for a track nobody can use yet because it is the more credible claim. "Coming
+                soon" invites the question of whether anything exists; a list saying two of these
+                are measurable today, two are small additions, and two are blocked on a consent
+                layer we have not built is defensible line by line — and the blockers are the part
+                a lender or a reviewer actually needs to read.
+              */}
+              {track.capabilities.length > 0 && (
+                <span className="wsform__caps">
+                  {track.capabilities.map((cap) => (
+                    <span key={cap.key} className="wsform__cap" title={cap.blocked_by}>
+                      <span className={`wsform__capDot wsform__capDot--${cap.status}`} aria-hidden="true" />
+                      {cap.label}
+                      {/* The status word, never colour alone — same rule as SeverityBadge. */}
+                      <span className="wsform__capStatus">{cap.status}</span>
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
           </label>
         );
