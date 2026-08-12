@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { redeemMagicLink, redeemVerification } from "@/app/auth/actions";
-import { getAccount, setFlash } from "@/lib/session";
+import { getAccount } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Confirming your link",
@@ -56,11 +56,33 @@ export default async function VerifyPage({
       // phone's mail app usually opens a *different* browser from the one they signed up
       // in, so there is often no cookie here — and dropping such a user at the dashboard
       // would bounce them to sign-in with no explanation of what just succeeded.
-      // A one-shot httpOnly cookie rather than a query parameter: nothing about the
-      // session ends up in browser history, Referer headers or CDN logs. See setFlash.
-      await setFlash("verified");
       const account = await getAccount();
-      redirect(account ? "/dashboard" : "/auth/login");
+
+      // ## The flash is a QUERY PARAMETER, not a cookie, and it has to be
+      //
+      // This was `await setFlash("verified")`, and it threw on every successful
+      // confirmation:
+      //
+      //     Error: Cookies can only be modified in a Server Action or Route Handler
+      //
+      // ...which Next.js renders as "A server error occurred. Reload to try again." So a
+      // brand-new subscriber received a welcome email, clicked the link, saw a hard 500 —
+      // and their address WAS confirmed, because the API call succeeds before this line.
+      // The one-time token was therefore already spent, so reloading could not help and
+      // requesting a new link produced the same crash. Signup looked broken at the exact
+      // moment it had worked.
+      //
+      // `cookies().set()` is unavailable during Server Component rendering by design:
+      // headers may already have been streamed, so there is no response left to attach a
+      // `Set-Cookie` to. A page render cannot write one, no matter how it is wrapped.
+      //
+      // The honest fix is to carry the notice in the redirect itself. A cookie was chosen
+      // to keep it out of browser history and Referer headers, which was a real concern —
+      // but `verified` is not sensitive: it names no account, carries no token, and is
+      // already implied by the URL the user just clicked. The token in *this* page's URL is
+      // the thing worth protecting, and it stays behind on the redirect.
+      const destination = account ? "/dashboard" : "/auth/login";
+      redirect(`${destination}?verified=1`);
     }
 
     return (

@@ -187,7 +187,12 @@ async def signup_individual(
             "or resetting your password.",
         )
 
-    sent = await mailer.send_verification(account.email, account.first_name, token or "")
+    sent = await mailer.send_verification(
+        account.email,
+        account.first_name,
+        token or "",
+        context=_request_context(request),
+    )
     access_token, expires_in = security.issue_session(account.id, account.kind.value)
 
     # ACCOUNT_CREATED was a declared-but-never-written audit action: the enum member
@@ -249,7 +254,12 @@ async def signup_commercial(
             "That email address cannot be registered. If it is yours, try logging in.",
         )
 
-    sent = await mailer.send_verification(account.email, account.first_name, token or "")
+    sent = await mailer.send_verification(
+        account.email,
+        account.first_name,
+        token or "",
+        context=_request_context(request),
+    )
     access_token, expires_in = security.issue_session(account.id, account.kind.value)
 
     await store.record_audit(
@@ -846,7 +856,9 @@ async def verify_email(
 
 
 @router.post("/resend-verification")
-async def resend_verification(account: Account = Depends(current_account)) -> dict:
+async def resend_verification(
+    request: Request, account: Account = Depends(current_account)
+) -> dict:
     """Re-send the confirmation link to the caller's own address.
 
     Requires a session, so it cannot be used to spray mail at arbitrary addresses —
@@ -876,7 +888,12 @@ async def resend_verification(account: Account = Depends(current_account)) -> di
             status.HTTP_503_SERVICE_UNAVAILABLE, "Could not issue a new link."
         ) from exc
 
-    sent = await mailer.send_verification(account.email, account.first_name, token)
+    sent = await mailer.send_verification(
+        account.email,
+        account.first_name,
+        token,
+        context=_request_context(request),
+    )
     return {"sent": sent, "expires_in_hours": settings.iam_verification_ttl_hours}
 
 
@@ -1064,6 +1081,7 @@ async def get_workspaces(
 async def create_workspace_route(
     payload: WorkspaceWrite,
     request: Request,
+    background: BackgroundTasks,
     account: Account = Depends(require_permission(Permission.MANAGE_WORKSPACE)),
 ) -> WorkspacePublic:
     """Create a workspace — a separate project with its own tracks and keys."""
@@ -1090,6 +1108,17 @@ async def create_workspace_route(
         detail=f"{payload.name} · tracks: {', '.join(payload.tracks)}",
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+    )
+
+    # Backgrounded and non-fatal: the workspace exists and is usable, so a slow mail provider
+    # must not turn a successful creation into a 5xx the caller will retry.
+    background.add_task(
+        mailer.send_workspace_notice,
+        account.email,
+        account.first_name,
+        workspace_name=payload.name,
+        created=True,
+        context=_request_context(request),
     )
     return _workspace_out(created)
 
@@ -1141,6 +1170,7 @@ async def update_workspace_route(
 async def delete_workspace_route(
     workspace_id: str,
     request: Request,
+    background: BackgroundTasks,
     account: Account = Depends(
         require_workspace_permission(Permission.MANAGE_WORKSPACE)
     ),
@@ -1154,6 +1184,21 @@ async def delete_workspace_route(
     _require_store()
 
     organisation = await store.organisation_for(account.id)
+
+    # Read the NAME before deleting it. The notice has to say which workspace went — an id is
+    # not something a recipient can recognise, and after the delete there is nothing left to
+    # look it up from. Falls back to the id rather than failing: a nameless notice still beats
+    # no notice, and this must not be able to block the deletion.
+    doomed = next(
+        (
+            w
+            for w in await store.list_workspaces(account.id)
+            if w.get("id") == workspace_id
+        ),
+        None,
+    )
+    workspace_name = (doomed or {}).get("name") or workspace_id
+
     if not await store.delete_workspace(organisation, workspace_id):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -1167,6 +1212,15 @@ async def delete_workspace_route(
         target_id=workspace_id,
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+    )
+
+    background.add_task(
+        mailer.send_workspace_notice,
+        account.email,
+        account.first_name,
+        workspace_name=workspace_name,
+        created=False,
+        context=_request_context(request),
     )
 
 
@@ -1297,7 +1351,9 @@ _normalise_area = normalise_area
 
 @router.post("/activate", response_model=Subscriber, status_code=status.HTTP_201_CREATED)
 async def activate(
-    payload: ActivationRequest, account: Account = Depends(verified_account)
+    request: Request,
+    payload: ActivationRequest,
+    account: Account = Depends(verified_account),
 ) -> Subscriber:
     """Bind a plot and go autonomous. The second half of the 60-second flow.
 
@@ -1435,7 +1491,12 @@ async def activate(
     except Exception:
         log.warning("first scan could not be queued; the watch loop will pick it up")
 
-    await mailer.send_welcome(account.email, account.first_name, area_name=area.name)
+    await mailer.send_welcome(
+        account.email,
+        account.first_name,
+        area_name=area.name,
+        context=_request_context(request),
+    )
 
     log.info(
         "subscription activated",
@@ -1451,7 +1512,9 @@ async def activate(
 
 @router.post("/api-keys", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
-    payload: ApiKeyCreate, account: Account = Depends(verified_account)
+    request: Request,
+    payload: ApiKeyCreate,
+    account: Account = Depends(verified_account),
 ) -> ApiKeyCreated:
     """Mint an API key. **Commercial accounts only.**
 
@@ -1540,6 +1603,7 @@ async def create_api_key(
         public.name,
         public.hint,
         scopes=[s.value for s in public.scopes],
+        context=_request_context(request),
     )
 
     # The audit module calls key events "the highest-value entries in the log" and then
@@ -1613,6 +1677,7 @@ class CustomerRecord(BaseModel):
     status_code=status.HTTP_201_CREATED,
 )
 async def create_customer(
+    request: Request,
     payload: CustomerCreate,
     aggregator: Aggregator = Depends(require_scope(ApiKeyScope.WRITE)),
 ) -> CustomerRecord:
@@ -1762,7 +1827,15 @@ async def create_customer(
     # The customer is told an account was made for them, and how to claim it. Sending
     # this is what makes aggregator onboarding transparent to the person it is about
     # rather than something done silently on their behalf.
-    await mailer.send_verification(account.email, account.first_name, token or "")
+    # The AGGREGATOR's device, not the customer's — the customer has no session yet. It tells
+    # the recipient which partner onboarded them, from where, which is the one check available
+    # against an unexpected 'confirm your address' mail from a service they never signed up to.
+    await mailer.send_verification(
+        account.email,
+        account.first_name,
+        token or "",
+        context=_request_context(request),
+    )
 
     log.info(
         "customer onboarded by aggregator",

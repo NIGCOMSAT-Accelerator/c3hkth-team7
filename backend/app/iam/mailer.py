@@ -59,7 +59,13 @@ def _verification_url(token: str) -> str:
     return f"{base}/auth/verify?purpose=email&token={token}"
 
 
-async def send_verification(email: str, first_name: str, token: str) -> bool:
+async def send_verification(
+    email: str,
+    first_name: str,
+    token: str,
+    *,
+    context: RequestContext | None = None,
+) -> bool:
     """Email the confirmation link. False on any failure."""
     url = _verification_url(token)
     subject = "Confirm your email to activate SHELTER alerts"
@@ -73,7 +79,10 @@ async def send_verification(email: str, first_name: str, token: str) -> bool:
         "deliberate, so nobody can subscribe someone else's inbox.\n\n"
         "If you did not create this account, ignore this message and nothing "
         "further will happen.\n\n"
-        "SHELTER — satellite early warning for flood, crop and health risk.\n"
+        # The device and place the SIGNUP came from. Someone whose address was entered by
+        # mistake — or deliberately — can see at a glance that it was not them.
+        + (context.plain() if context else "")
+        + "\nSHELTER — satellite early warning for flood, crop and health risk.\n"
     )
 
     html = layout.render(
@@ -93,6 +102,7 @@ async def send_verification(email: str, first_name: str, token: str) -> bool:
                 "confirm, we send nothing to this address — that is deliberate, so "
                 "nobody can subscribe someone else's inbox."
             )
+            + (context.block() if context else "")
         ),
     )
     return await _send(email, subject, plain, html)
@@ -410,7 +420,13 @@ async def send_team_welcome(
     return await _send(email, subject, plain, html)
 
 
-async def send_welcome(email: str, first_name: str, *, area_name: str | None = None) -> bool:
+async def send_welcome(
+    email: str,
+    first_name: str,
+    *,
+    area_name: str | None = None,
+    context: RequestContext | None = None,
+) -> bool:
     """Sent once the plot is bound and autonomous monitoring is live.
 
     Its job is to set expectations: the system now watches without being asked, which
@@ -432,7 +448,10 @@ async def send_welcome(email: str, first_name: str, *, area_name: str | None = N
         "You do not need to open an app or check a website. We contact you.\n\n"
         "Change your language, channels or plot any time in the portal:\n"
         f"{settings.public_site_url}\n\n"
-        "SHELTER — satellite early warning for flood, crop and health risk.\n"
+        # The device that completed activation. This is the first mail a subscriber gets after
+        # their account goes live, so it is the natural place to confirm it was them.
+        + (context.plain() if context else "")
+        + "\nSHELTER — satellite early warning for flood, crop and health risk.\n"
     )
     html = layout.render(
         kind="welcome",
@@ -457,6 +476,7 @@ async def send_welcome(email: str, first_name: str, *, area_name: str | None = N
             + layout.note(
                 "Change your language, channels or plot any time in the portal."
             )
+            + (context.block() if context else "")
         ),
     )
     return await _send(email, subject, plain, html)
@@ -473,6 +493,7 @@ async def send_area_added(
     admin2: str | None = None,
     country: str | None = None,
     added_by: str | None = None,
+    context: RequestContext | None = None,
 ) -> bool:
     """Confirm one plot is under monitoring, and say where we think it is.
 
@@ -528,6 +549,9 @@ async def send_area_added(
         "IF THE LOCATION ABOVE IS WRONG\n"
         "Tell us before the first alert arrives. An advisory about the wrong field is "
         "worse than no advisory, and it is much easier to correct now.\n"
+        # Matters most when `added_by` is set: an aggregator registered land on someone's
+        # behalf, and the farmer should be able to see which device did it.
+        + (context.plain() if context else "")
     )
 
     def row(label: str, value: str) -> str:
@@ -566,6 +590,7 @@ async def send_area_added(
                 "arrives — an advisory about the wrong field is worse than none, and it is "
                 "far easier to correct now."
             )
+            + (context.block() if context else "")
         ),
     )
     return await _send(email, subject, plain, html)
@@ -577,6 +602,7 @@ async def send_channels_changed(
     *,
     channels: list[dict],
     changed_by: str | None = None,
+    context: RequestContext | None = None,
 ) -> bool:
     """Confirm where alerts will now be delivered.
 
@@ -622,6 +648,9 @@ async def send_channels_changed(
         "Sign in and change it back, or reply to this message. Alert channels decide who "
         "learns that your farm is at risk, so a change you did not make is worth "
         "checking immediately.\n"
+        # Where the change came from. This notice exists precisely for the case where someone
+        # else redirected a subscriber's warnings.
+        + (context.plain() if context else "")
     )
 
     html = layout.render(
@@ -642,6 +671,7 @@ async def send_channels_changed(
                 "If you did not expect this, change it back or reply to this message. Alert "
                 "channels decide who learns that your farm is at risk."
             )
+            + (context.block() if context else "")
         ),
     )
     return await _send(email, subject, plain, html)
@@ -715,8 +745,218 @@ class RequestContext:
             f"  Estimated location: {self.location or 'unknown'}\n"
             "\nLocation is estimated from the IP address and is often the mobile "
             "network's gateway rather than your exact town. If none of this looks like "
-            "you, do not use the link above.\n"
+            # Deliberately not "do not use the link above": this block now appears on notices
+            # that carry no link at all (a new API key, a changed delivery channel, a plot
+            # registered for you). Telling someone not to click a link that is not there reads
+            # as a template mistake and undermines the one paragraph that must be believed.
+            "you, it was not you — secure the account and tell us.\n"
         )
+
+
+def request_context(request) -> RequestContext:
+    """Device and estimated location for a security email. **Never raises.**
+
+    ## Why this lives here and not only in `api/routes/iam.py`
+
+    `iam.py` grew a private `_request_context`, and it works — but `subscribers.py` needs the
+    same thing for the channels-changed and area-added notices, and copying it would mean two
+    implementations of a security-relevant derivation drifting apart. The rule that matters (an
+    unresolvable IP degrades to `None` rather than raising) has to hold identically everywhere,
+    so it is expressed once.
+
+    `geo` is imported inside the function: `app.iam.geo` opens a 130 MB MaxMind database, and
+    the mail layer must stay importable without it — the same reason `RequestContext.from_request`
+    takes the location as an argument rather than looking it up.
+
+    A missing request, an absent client, an unparsed user-agent and an unresolvable IP all yield
+    `None` fields, which `request_details` renders as an em dash. A failure here must never break
+    a send: a 500 while emailing a password reset would lock someone out of their own account.
+    """
+    if request is None:
+        return RequestContext()
+
+    try:
+        from app.iam import geo, useragent
+
+        ip = request.client.host if request.client else None
+        ua = useragent.parse(request.headers.get("user-agent"))
+        # None for an unresolvable public IP, a "Local network" Location for RFC1918. Both are
+        # honest answers and both are safe to render.
+        located = geo.lookup(ip) if ip else None
+        return RequestContext(
+            ip=ip,
+            os_name=ua.os,
+            browser=ua.browser,
+            location=located.label if located else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "could not build the request context for a security email",
+            extra={"error": str(exc)},
+        )
+        return RequestContext()
+
+
+async def send_workspace_notice(
+    email: str,
+    first_name: str,
+    *,
+    workspace_name: str,
+    created: bool,
+    actor: str | None = None,
+    context: RequestContext | None = None,
+) -> bool:
+    """A workspace was created or deleted. **A security notice, not a receipt.**
+
+    ## Why this email exists
+
+    A workspace is the tenancy boundary: it owns its own customers, API keys and team roles. So
+    creating one opens a new container for other people's farm data, and deleting one detaches
+    every customer in it from the aggregator serving them. Both are exactly the actions an
+    attacker with a stolen session would take — a new workspace to work in unobserved, or a
+    deletion to cause damage — and neither was announced to anybody.
+
+    The audit log recorded them (`WORKSPACE_CREATED` / `WORKSPACE_DELETED`), which is the right
+    place to *investigate* from and the wrong place to *notice* from: nobody reads an audit log
+    on the day it matters.
+
+    ## One sender for both directions
+
+    `created` selects the wording. Two functions would be two chrome call sites, two subject
+    conventions and two places to add the fingerprint block — and the second would drift, which
+    is the entire reason `email/layout.py` exists.
+
+    **Deletion leads with the consequence, not the confirmation.** "Deleted" alone reads as
+    housekeeping; naming what stopped is what makes a wrong deletion recoverable while the
+    recipient still remembers the password they used.
+    """
+    verb = "created" if created else "deleted"
+    subject = f"SHELTER workspace {verb}: {workspace_name}"
+    by = f" by {actor}" if actor else ""
+
+    consequence_plain = (
+        "Customers, API keys and team roles you add to it are scoped to this workspace "
+        "alone — a key minted here can never reach another project.\n"
+        if created
+        else "Its customers are no longer served through it, and any API key scoped to it "
+        "stops working. Past assessments are kept — they were true when measured.\n"
+    )
+
+    plain = (
+        f"Hello {first_name},\n\n"
+        f"The workspace \"{workspace_name}\" was {verb}{by}.\n\n"
+        + consequence_plain
+        + "\nIF THIS WAS NOT YOU\n"
+        "A workspace is a tenancy boundary — it holds other people's farm data. Change your "
+        "password, review your API keys, and tell your organisation's administrator. The "
+        "device and location the request came from are below.\n\n"
+        + (context.plain() if context else "")
+        + "\nSHELTER — satellite early warning for flood, crop and health risk.\n"
+    )
+
+    consequence_html = (
+        "Customers, API keys and team roles you add to it are scoped to this workspace alone "
+        "— a key minted here can never reach another project."
+        if created
+        else "Its customers are no longer served through it, and any API key scoped to it "
+        "stops working. Past assessments are kept, because they were true when measured."
+    )
+
+    html = layout.render(
+        kind="security",
+        eyebrow="Workspace security",
+        title=f"Workspace {verb}",
+        body_html=(
+            f'<p style="margin:0 0 16px;">Hello {first_name}, the workspace '
+            f"<strong>{workspace_name}</strong> was {verb}{by}.</p>"
+            f'<p style="margin:0 0 16px;">{consequence_html}</p>'
+            + layout.note(
+                "If this was not you, change your password and review your API keys — a "
+                "workspace is a tenancy boundary and it holds other people's farm data."
+            )
+            + (context.block() if context else "")
+        ),
+    )
+    return await _send(email, subject, plain, html)
+
+
+async def send_webhook_notice(
+    email: str,
+    first_name: str,
+    *,
+    endpoint_url: str,
+    created: bool,
+    actor: str | None = None,
+    context: RequestContext | None = None,
+) -> bool:
+    """A webhook endpoint was registered or removed. **The highest-value notice of the set.**
+
+    ## Why this one matters more than it looks
+
+    A webhook subscription is a standing instruction to send every matching alert to a URL. So
+    registering one is the quietest possible exfiltration: no password changes, no login shows
+    up anywhere unusual, and from then on a third party receives hazard advisories naming a
+    farmer, their plot and its coordinates. Deleting one is the mirror image — an aggregator's
+    integration simply stops receiving alerts, and the first sign is a customer asking why
+    nobody warned them.
+
+    Neither was emailed, and neither was even in `AuditAction` before this change.
+
+    ## The URL is stated in full, deliberately
+
+    It is the one field that answers "is this mine?". A truncated host would defeat the entire
+    purpose: `hooks.acme.example` and `hooks.acme.example.attacker.tld` differ only in the part
+    a truncation removes. It is not a secret — the signing secret is, and that is never in an
+    email.
+    """
+    verb = "registered" if created else "removed"
+    subject = f"SHELTER webhook {verb}"
+    by = f" by {actor}" if actor else ""
+
+    plain = (
+        f"Hello {first_name},\n\n"
+        f"A webhook endpoint was {verb}{by}:\n\n"
+        f"  {endpoint_url}\n\n"
+        + (
+            "From now on, alerts matching this subscription's filters are POSTed there, "
+            "signed so the receiver can verify they came from SHELTER.\n"
+            if created
+            else "Alerts are no longer sent to it. If an integration depended on this "
+            "endpoint, it will now receive nothing.\n"
+        )
+        + "\nIF THIS WAS NOT YOU\n"
+        "A webhook is a standing instruction to forward hazard advisories — which name a "
+        "subscriber, their plot and its location — to that address. Remove it in the portal, "
+        "rotate your API keys, and change your password. The device and location the request "
+        "came from are below.\n\n"
+        + (context.plain() if context else "")
+        + "\nSHELTER — satellite early warning for flood, crop and health risk.\n"
+    )
+
+    html = layout.render(
+        kind="security",
+        eyebrow="Integration security",
+        title=f"Webhook {verb}",
+        body_html=(
+            f'<p style="margin:0 0 12px;">Hello {first_name}, a webhook endpoint was '
+            f"{verb}{by}:</p>"
+            # Monospace and break-anywhere: this is the value a reader compares character by
+            # character, and a long URL must not overflow a phone's viewport.
+            f'<p style="margin:0 0 18px;font-family:ui-monospace,SFMono-Regular,Menlo,'
+            f'monospace;font-size:12.5px;word-break:break-all;color:{_INK};">'
+            f"{endpoint_url}</p>"
+            + layout.note(
+                "A webhook forwards hazard advisories — which name a subscriber, their plot "
+                "and its location — to that address. If you did not set this up, remove it "
+                "and rotate your API keys."
+                if created
+                else "Alerts are no longer delivered to this endpoint. If an integration "
+                "relied on it, it will now receive nothing."
+            )
+            + (context.block() if context else "")
+        ),
+    )
+    return await _send(email, subject, plain, html)
 
 
 async def send_api_key_notice(
@@ -726,6 +966,7 @@ async def send_api_key_notice(
     hint: str,
     *,
     scopes: list[str] | None = None,
+    context: RequestContext | None = None,
 ) -> bool:
     """Tell an aggregator a key was minted, and how to integrate with it.
 
@@ -773,7 +1014,10 @@ async def send_api_key_notice(
         "If you did not create this key, revoke it immediately in the portal and "
         "change your password. Keys can be rotated with a grace window, so you can "
         "deploy a replacement before the old one stops working.\n\n"
-        "SHELTER — satellite early warning for flood, crop and health risk.\n"
+        # A key grants API access without a password, so "who minted this, from where" is the
+        # single most useful fact in this email.
+        + (context.plain() if context else "")
+        + "\nSHELTER — satellite early warning for flood, crop and health risk.\n"
     )
     html = layout.render(
         kind="api_key",
@@ -794,6 +1038,7 @@ async def send_api_key_notice(
                 "If you did not create this key, revoke it immediately in the portal "
                 "and change your password."
             )
+            + (context.block() if context else "")
         ),
     )
     return await _send(email, subject, plain, html)

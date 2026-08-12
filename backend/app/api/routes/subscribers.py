@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.agents import pipeline
 from app.api.area_input import normalise_area, reject_unavailable_channels
 from app.api.audience import Audience, resolve_audience
 from app.eo import geometry
-from app.iam import attribution
+from app.iam import attribution, mailer
 from app.iam import store as iam_store
 from app.iam.models import ApiKeyScope
 from app.iam.platform import require_platform_scope
@@ -162,6 +162,7 @@ class ChannelUpdate(BaseModel):
 
 @router.put("/{subscriber_id}/channels", response_model=Subscriber)
 async def replace_channels(
+    request: Request,
     subscriber_id: str,
     payload: ChannelUpdate,
     background: BackgroundTasks,
@@ -240,7 +241,16 @@ async def replace_channels(
         for b in saved.channels
     }
     if current != previous:
-        background.add_task(_confirm_channels_changed, subscriber_id, saved, caller.label)
+        # Built HERE, not inside the task. A `Request` must not outlive its response — the
+        # background task runs after the connection is released, so `request.client` may
+        # already be gone. A plain value is safe to carry across that boundary.
+        background.add_task(
+            _confirm_channels_changed,
+            subscriber_id,
+            saved,
+            caller.label,
+            mailer.request_context(request),
+        )
 
     log.info(
         "channels replaced",
@@ -250,7 +260,10 @@ async def replace_channels(
 
 
 async def _confirm_channels_changed(
-    subscriber_id: str, subscriber: Subscriber, audience: str
+    subscriber_id: str,
+    subscriber: Subscriber,
+    audience: str,
+    context: mailer.RequestContext | None = None,
 ) -> None:
     """Email the subscriber that their alert delivery changed. Never raises.
 
@@ -269,8 +282,6 @@ async def _confirm_channels_changed(
             actor = await iam_store.get_account(audience.split(":", 1)[1])
             changed_by = (actor.organisation or actor.first_name) if actor else "your provider"
 
-        from app.iam import mailer
-
         await mailer.send_channels_changed(
             account.email,
             account.first_name,
@@ -279,7 +290,7 @@ async def _confirm_channels_changed(
                     "channel": b.channel.value,
                     "address": b.address,
                     "min_severity": b.min_severity.value,
-                    # Passed through so the notice states the dial. See `mailer.describe`.
+                    # Passed through so the notice states the dial.
                     "min_score": b.min_score,
                     "area": next(
                         (a.name for a in subscriber.areas if a.id == b.aoi_id), None
@@ -289,6 +300,7 @@ async def _confirm_channels_changed(
                 if b.enabled
             ],
             changed_by=changed_by,
+            context=context,
         )
     except Exception as exc:  # noqa: BLE001
         log.warning(
@@ -452,7 +464,10 @@ async def list_areas(
     dependencies=[Depends(require_platform_scope(ApiKeyScope.PLATFORM_SUBSCRIBERS))],
 )
 async def create_area(
-    subscriber_id: str, payload: AreaOfInterest, background: BackgroundTasks
+    request: Request,
+    subscriber_id: str,
+    payload: AreaOfInterest,
+    background: BackgroundTasks,
 ) -> AreaOfInterest:
     """Add an area to an existing subscription, and scan it immediately.
 
@@ -500,14 +515,18 @@ async def create_area(
     # Backgrounded, and non-fatal: the area is already durable and already queued, so a slow mail
     # provider must not turn a successful creation into an error.
     background.add_task(
-        _confirm_area_added, subscriber_id, created
+        _confirm_area_added, subscriber_id, created, mailer.request_context(request)
     )
 
     log.info("area added", extra={"subscriber_id": subscriber_id, "aoi_id": created.id})
     return created
 
 
-async def _confirm_area_added(subscriber_id: str, area: AreaOfInterest) -> None:
+async def _confirm_area_added(
+    subscriber_id: str,
+    area: AreaOfInterest,
+    context: mailer.RequestContext | None = None,
+) -> None:
     """Email the subscriber that this plot is being watched. Never raises.
 
     Resolves the account for the name and address rather than reading the subscriber's email
@@ -522,7 +541,6 @@ async def _confirm_area_added(subscriber_id: str, area: AreaOfInterest) -> None:
         account = await iam_store.account_for_subscriber(subscriber_id)
         if account is None or not account.email:
             return
-        from app.iam import mailer
 
         await mailer.send_area_added(
             account.email,
@@ -532,6 +550,7 @@ async def _confirm_area_added(subscriber_id: str, area: AreaOfInterest) -> None:
             admin1=area.admin1,
             admin2=area.admin2,
             country=area.country,
+            context=context,
         )
     except Exception as exc:  # noqa: BLE001
         log.warning(

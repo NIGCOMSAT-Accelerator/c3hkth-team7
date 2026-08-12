@@ -139,6 +139,65 @@ interface RequestOptions extends RequestInit {
 }
 
 /**
+ * The real visitor's IP and User-Agent, forwarded to the backend.
+ *
+ * ## Why this is needed at all
+ *
+ * Every call in this module runs **server-side**, inside the Next.js container. So without
+ * forwarding, the API sees the *renderer* rather than the visitor:
+ *
+ *     request.client.host     ->  10.0.1.45   (the UI container on the private network)
+ *     header "user-agent"     ->  undici      (Node's fetch implementation)
+ *
+ * `geo.lookup("10.0.1.45")` correctly answers **"Local network"** — an RFC1918 address is a
+ * private address, and saying so is more honest than inventing a city — and
+ * `useragent.parse("undici")` answers **"Desktop"**, because it is not a known mobile string.
+ * Both were reported in production: the security page said "Local network / This device" for
+ * every session, on a VPS, for every user.
+ *
+ * Neither is a backend bug. The backend correctly describes what reached it; the frontend was
+ * describing itself.
+ *
+ * ## Why `x-forwarded-for` is appended rather than replaced
+ *
+ * Traefik already sets it to the visitor's IP on the way in. Appending the renderer keeps the
+ * chain honest — `client, proxy, renderer` — and uvicorn (`--proxy-headers`) takes the
+ * left-most entry, which is the visitor. Overwriting it with a single value would work today
+ * and lose the audit trail the header exists to carry.
+ *
+ * Returns nothing outside a request scope: `headers()` throws there, and a background task
+ * legitimately has no visitor to describe.
+ */
+async function forwardedClientHeaders(): Promise<Record<string, string>> {
+  try {
+    const { headers } = await import("next/headers");
+    const incoming = await headers();
+
+    const out: Record<string, string> = {};
+
+    // The visitor's own UA, so the backend records "iPhone · Safari" rather than Node.
+    const agent = incoming.get("user-agent");
+    if (agent) out["user-agent"] = agent;
+
+    // Prefer the chain Traefik built; fall back to whatever single hop is known.
+    const chain =
+      incoming.get("x-forwarded-for") ?? incoming.get("x-real-ip") ?? null;
+    if (chain) out["x-forwarded-for"] = chain;
+
+    // Preserved so the backend can build absolute URLs (verification links) that match the
+    // scheme the visitor actually used, rather than assuming http inside the network.
+    const proto = incoming.get("x-forwarded-proto");
+    if (proto) out["x-forwarded-proto"] = proto;
+
+    return out;
+  } catch {
+    // Not in a request scope — a module-level call, or a background task. Nothing to forward,
+    // and the backend's own fallbacks are correct for that case.
+    return {};
+  }
+}
+
+/**
  * Pulls a human-readable sentence out of a FastAPI error body.
  *
  * FastAPI reports a validation failure as a list of Pydantic errors, and the raw body
@@ -218,6 +277,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
+  }
+
+  // Describe the VISITOR, not this container. Without these the backend records every session
+  // as "Local network / Desktop" — see `forwardedClientHeaders`.
+  //
+  // Applied before the credential headers below and via `set`, so an explicit caller-supplied
+  // value still wins: `init.headers` is seeded into `headers` above, and these only fill in what
+  // the caller did not specify.
+  for (const [name, value] of Object.entries(await forwardedClientHeaders())) {
+    if (!headers.has(name)) headers.set(name, value);
   }
   // Both headers during migration, and the backend prefers the scoped one.
   //

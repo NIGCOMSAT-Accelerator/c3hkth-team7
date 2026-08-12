@@ -17,7 +17,45 @@ import "server-only";
  * and because every consumer is a server component rendering an `href`.
  */
 
-const API_URL = process.env.SHELTER_API_URL ?? "http://localhost:8000";
+/**
+ * The backend's PUBLIC origin — what a browser can reach.
+ *
+ * ## Why this is not `SHELTER_API_URL`
+ *
+ * `SHELTER_API_URL` is the origin *this container* uses to reach the API, and in a single-node
+ * deployment that is a Docker service name:
+ *
+ *     SHELTER_API_URL: http://shelter-api:8000
+ *
+ * Correct for server-to-server calls, and unusable in an `href`. Signed in as an aggregator on
+ * production, the portal rendered:
+ *
+ *     <a href="http://shelter-api:8000/shelter/v1/api/dev-docs">Developer docs</a>
+ *
+ * ...which no browser can resolve. It affected three surfaces — the header link (commercial
+ * accounts only, which is why it looked like an aggregator-specific bug), the API-keys page and
+ * the webhooks empty state.
+ *
+ * So the two are separated by intent rather than by value:
+ *
+ *     SHELTER_API_URL         where the SERVER calls the API   (may be internal)
+ *     SHELTER_API_PUBLIC_URL  where the BROWSER should go      (must be routable)
+ *
+ * The fallback chain degrades safely rather than silently: the public URL if set, else
+ * `SHELTER_API_URL` when it is *not* an internal hostname, else the relative path. A relative
+ * link 404s visibly on the frontend origin; an internal hostname fails with
+ * ERR_NAME_NOT_RESOLVED and looks like the docs are down.
+ */
+const INTERNAL_HOST = /^https?:\/\/(shelter-api|api|localhost|127\.0\.0\.1|host\.docker\.internal)(:|\/|$)/i;
+
+const SERVER_URL = process.env.SHELTER_API_URL ?? "";
+const PUBLIC_URL =
+  process.env.SHELTER_API_PUBLIC_URL ??
+  (SERVER_URL && !INTERNAL_HOST.test(SERVER_URL) ? SERVER_URL : "");
+
+// Empty string yields a root-relative link. Wrong origin, but it 404s in a way an operator can
+// diagnose — unlike a Docker service name, which a browser cannot even attempt.
+const API_URL = PUBLIC_URL;
 const API_PREFIX = process.env.SHELTER_API_PREFIX ?? "/shelter/v1/api";
 
 /**

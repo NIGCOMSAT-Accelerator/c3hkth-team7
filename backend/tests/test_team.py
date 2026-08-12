@@ -508,11 +508,97 @@ def test_security_notifications_carry_device_and_location():
         mailer.send_profile_activated,
         mailer.send_password_reset,
         mailer.send_magic_link,
+        mailer.send_password_change_code,
+        # Added later, and each one reports an action a person should be able to disown:
+        mailer.send_verification,      # someone entered this address
+        mailer.send_welcome,           # a subscription went live
+        mailer.send_api_key_notice,    # a credential now exists
+        mailer.send_area_added,        # land was put under monitoring, possibly by an aggregator
+        mailer.send_channels_changed,  # where the warnings go was changed
+        mailer.send_workspace_notice,  # a tenancy boundary was opened or destroyed
+        mailer.send_webhook_notice,    # advisories now forward to a URL, or stopped
     ):
         assert "context" in inspect.signature(sender).parameters, (
             f"{sender.__name__} must accept a RequestContext so the reader can validate the "
             "device, IP and location the action came from"
         )
+
+
+def test_every_security_email_actually_renders_the_block():
+    """A `context` parameter that is never rendered is worse than none.
+
+    The signature check above passed for months while `RequestContext` had **zero callers** and
+    no email displayed a single row — the class, the renderer and the parameter all existed and
+    nothing joined them up. So this asserts the body, not the interface: both the text and the
+    HTML alternative, because the text part is what a feature-phone client shows and it is the
+    security-conscious reader who is most likely to be reading it.
+    """
+    import inspect
+
+    from app.iam import mailer
+
+    for name in (
+        "send_verification",
+        "send_welcome",
+        "send_magic_link",
+        "send_password_reset",
+        "send_password_change_code",
+        "send_team_invitation",
+        "send_profile_activated",
+        "send_api_key_notice",
+        "send_area_added",
+        "send_channels_changed",
+        "send_workspace_notice",
+        "send_webhook_notice",
+    ):
+        body = inspect.getsource(getattr(mailer, name))
+        assert "context.plain()" in body, f"{name} never renders the text fingerprint"
+        assert "context.block()" in body, f"{name} never renders the HTML fingerprint"
+
+
+def test_every_mailer_call_site_passes_a_context():
+    """The half that was actually missing.
+
+    `RequestContext`, `from_request`, `block`, `plain` and `layout.request_details` were all
+    written, reviewed and shipped — and **not one call site built one**, so every security
+    notice went out without the device and location block. A signature test cannot catch that;
+    only walking the callers can.
+
+    `send_team_welcome` is the deliberate exception: it is the prose companion to
+    `send_profile_activated`, and a device table in marketing copy trains the reader to skim past
+    the ones that matter. See `test_activation_and_welcome_are_separate_emails`.
+    """
+    import ast
+    import pathlib
+
+    EXEMPT = {"send_team_welcome"}
+    unwired: list[str] = []
+
+    for path in ("app/api/routes/iam.py", "app/api/routes/subscribers.py"):
+        tree = ast.parse(pathlib.Path(path).read_text())
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr.startswith("send_")
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "mailer"
+            ):
+                continue
+            if node.func.attr in EXEMPT:
+                continue
+            passes = any(k.arg == "context" for k in node.keywords) or any(
+                isinstance(a, ast.Call)
+                and getattr(a.func, "id", "") in ("_request_context", "request_context")
+                for a in node.args
+            )
+            if not passes:
+                unwired.append(f"{path}:{node.lineno} {node.func.attr}")
+
+    assert not unwired, (
+        "these mailer calls send a security notice with no device or location block, so the "
+        f"recipient cannot tell their own action from an intruder's: {unwired}"
+    )
 
 
 def test_the_welcome_email_claims_nothing_the_pipeline_cannot_do():
@@ -675,3 +761,104 @@ def test_the_resend_response_never_carries_the_token():
     returned = body[body.index("return {") :]
 
     assert "plaintext" not in returned, "the resend response must not include the token"
+
+
+# --------------------------------------------------------------------------- #
+# Workspace and webhook notices — added after the judges' review
+# --------------------------------------------------------------------------- #
+
+
+def test_workspace_and_webhook_changes_are_emailed_in_both_directions():
+    """Create AND delete, because only one of the two is usually remembered.
+
+    A workspace is the tenancy boundary: creating one opens a container for other people's farm
+    data, deleting one detaches every customer served through it. A webhook is a standing
+    instruction to forward advisories — naming a subscriber, their plot and its coordinates — to a
+    URL, so registering one is the quietest exfiltration the platform allows and removing one
+    silently ends an integration.
+
+    None of the four was emailed before this, and the webhook pair was not even audited.
+    """
+    import inspect
+
+    from app.api.routes import iam as iam_routes
+    from app.api.routes import webhooks as webhook_routes
+
+    created = inspect.getsource(iam_routes.create_workspace_route)
+    deleted = inspect.getsource(iam_routes.delete_workspace_route)
+    assert "send_workspace_notice" in created, "creating a workspace tells nobody"
+    assert "send_workspace_notice" in deleted, "deleting a workspace tells nobody"
+    assert "created=True" in created and "created=False" in deleted, (
+        "both directions must reach the same sender with the correct flag, or one of them "
+        "describes the wrong action"
+    )
+
+    wh_created = inspect.getsource(webhook_routes.create_subscription)
+    wh_deleted = inspect.getsource(webhook_routes.delete_subscription)
+    assert "_notify_webhook_change" in wh_created, "registering a webhook tells nobody"
+    assert "_notify_webhook_change" in wh_deleted, "removing a webhook tells nobody"
+
+
+def test_the_deletion_notices_capture_the_name_before_destroying_it():
+    """**The ordering bug this would otherwise have.**
+
+    A delete notice has to say WHICH workspace or endpoint went — an id is not something a
+    recipient can recognise. Both values are only readable before the row is gone, so the read
+    must precede the delete. Reading afterwards yields None and the email names nothing.
+    """
+    import inspect
+
+    from app.api.routes import iam as iam_routes
+    from app.api.routes import webhooks as webhook_routes
+
+    ws = inspect.getsource(iam_routes.delete_workspace_route)
+    assert ws.index("list_workspaces") < ws.index("delete_workspace("), (
+        "the workspace name is read after the delete, so the notice cannot name it"
+    )
+
+    # `store.`-qualified, so the function's own `async def delete_subscription(` line is not
+    # matched first — which it was, making this assertion compare a definition against a call.
+    wh = inspect.getsource(webhook_routes.delete_subscription)
+    assert wh.index("store.get_subscription(") < wh.index("store.delete_subscription("), (
+        "the endpoint URL is read after the delete, so the notice cannot name it"
+    )
+
+
+def test_webhook_changes_are_audited():
+    """The permanent record, separate from the email.
+
+    `WEBHOOK_CREATED` and `WEBHOOK_DELETED` did not exist in `AuditAction` at all, so the
+    highest-value integration change on the platform left no trace to investigate from.
+    """
+    import inspect
+
+    from app.api.routes import webhooks as webhook_routes
+    from app.iam.audit import AuditAction
+
+    assert AuditAction.WEBHOOK_CREATED.value == "webhook.created"
+    assert AuditAction.WEBHOOK_DELETED.value == "webhook.deleted"
+
+    assert "WEBHOOK_CREATED" in inspect.getsource(webhook_routes.create_subscription)
+    assert "WEBHOOK_DELETED" in inspect.getsource(webhook_routes.delete_subscription)
+
+
+def test_the_platform_caller_is_not_emailed_about_webhooks():
+    """`owner_account_id is None` is the operations key, which belongs to no single person.
+
+    Same convention as `Audience.permitted_subscriber_ids`, and the same trap: None means
+    unrestricted, never "nobody". Emailing here would either fail or reach an inbox for which
+    "you did this" is not true. The audit entry still records it.
+    """
+    import inspect
+
+    from app.api.routes import webhooks as webhook_routes
+
+    body = inspect.getsource(webhook_routes._notify_webhook_change)
+    assert "if not caller.owner_account_id" in body, (
+        "the platform caller is not excluded, so a shared operations key would trigger a "
+        "personal security notice"
+    )
+    assert "except Exception" in body, (
+        "a mail failure must not propagate: the subscription is already stored and the caller "
+        "cannot act on a mail error"
+    )

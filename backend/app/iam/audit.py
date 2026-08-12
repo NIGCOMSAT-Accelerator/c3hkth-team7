@@ -159,6 +159,15 @@ class AuditAction(str, Enum):
     CUSTOMER_READ = "aggregator.customer.read"
     CUSTOMER_SCAN_TRIGGERED = "aggregator.customer.scan_triggered"
 
+    # Webhook subscriptions.
+    #
+    # Absent until now, which left the highest-value integration change with no record at all: a
+    # webhook is a standing instruction to forward hazard advisories — naming a subscriber, their
+    # plot and its coordinates — to an arbitrary URL. Registering one is the quietest exfiltration
+    # the platform allows, and nothing audited it.
+    WEBHOOK_CREATED = "webhook.created"
+    WEBHOOK_DELETED = "webhook.deleted"
+
 
 class AuditOutcome(str, Enum):
     SUCCESS = "success"

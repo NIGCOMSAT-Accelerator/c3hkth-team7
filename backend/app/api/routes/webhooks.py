@@ -16,7 +16,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Security,
+    status,
+)
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.security_schemes import (
@@ -26,6 +35,7 @@ from app.api.security_schemes import (
 )
 from app.config import settings
 from app.iam import store as iam_store
+from app.iam.audit import AuditAction
 from app.iam.models import AccountKind, ApiKeyScope
 from app.iam.platform import require_platform_scope
 from app.iam.roles import Permission
@@ -653,13 +663,69 @@ def _owned_or_404(row: dict | None, caller: WebhookCaller) -> dict:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such subscription")
     return row
 
+async def _notify_webhook_change(
+    caller: WebhookCaller,
+    *,
+    endpoint_url: str,
+    created: bool,
+    request: Request,
+) -> None:
+    """Email the owning account that a webhook was registered or removed. **Never raises.**
+
+    ## Why this is worth an email at all
+
+    A webhook subscription is a standing instruction to forward every matching advisory — which
+    names a subscriber, their plot and its coordinates — to a URL. Registering one is the quietest
+    exfiltration the platform allows: no password change, no unusual login, and the alerts simply
+    start arriving somewhere else as well. Removing one is the mirror image, and its first symptom
+    is a customer asking why nobody warned them.
+    Neither was emailed, and neither was even audited, before this.
+
+    ## The platform caller gets no email, deliberately
+
+    `owner_account_id is None` means the operations team's own key, which belongs to no single
+    person — there is no inbox that "you did this" would be true of. The audit entry still records
+    it. Same convention as `Audience.permitted_subscriber_ids`, and the same trap: None means
+    unrestricted, not "nobody".
+
+    Swallows everything. A subscription that is already stored must not fail its response because
+    a mail provider was slow, and the caller has no way to act on a mail error anyway.
+    """
+    if not caller.owner_account_id:
+        return
+
+    try:
+        from app.iam import mailer
+
+        account = await iam_store.get_account(caller.owner_account_id)
+        if account is None:
+            return
+
+        await mailer.send_webhook_notice(
+            account.email,
+            account.first_name,
+            endpoint_url=endpoint_url,
+            created=created,
+            context=mailer.request_context(request),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "webhook change notice could not be sent",
+            extra={"owner": caller.owner_account_id, "error": str(exc)},
+        )
+
+
 @router.post(
     "/subscriptions",
     response_model=WebhookCreated,
     status_code=status.HTTP_201_CREATED,
 )
+
 async def create_subscription(
-    payload: WebhookCreate, caller: WebhookCaller = Depends(webhook_caller)
+    payload: WebhookCreate,
+    request: Request,
+    background: BackgroundTasks,
+    caller: WebhookCaller = Depends(webhook_caller),
 ) -> WebhookCreated:
     """Register an endpoint. Returns the signing secret **once**.
 
@@ -704,6 +770,24 @@ async def create_subscription(
     log.info(
         "webhook subscription created",
         extra={"subscription_id": row["id"], "url": row["url"]},
+    )
+
+    if caller.owner_account_id:
+        await iam_store.record_audit(
+            account_id=caller.owner_account_id,
+            action=AuditAction.WEBHOOK_CREATED,
+            target_id=row["id"],
+            detail=f"{row['name']} -> {row['url']}",
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+
+    background.add_task(
+        _notify_webhook_change,
+        caller,
+        endpoint_url=row["url"],
+        created=True,
+        request=request,
     )
     return WebhookCreated(
         id=row["id"],
@@ -761,13 +845,38 @@ async def get_subscription(
     response_model=None,
 )
 async def delete_subscription(
-    subscription_id: str, caller: WebhookCaller = Depends(webhook_caller)
+    subscription_id: str,
+    request: Request,
+    background: BackgroundTasks,
+    caller: WebhookCaller = Depends(webhook_caller),
 ) -> None:
     # Ownership proved BEFORE the delete, not after: a cross-tenant id must not be destroyed
     # and then reported as missing.
-    _owned_or_404(await store.get_subscription(subscription_id), caller)
+    #
+    # The row is also kept, not discarded: the notice has to name the URL that stopped
+    # receiving alerts, and after the delete there is nothing left to read it from. An id is
+    # not something a recipient can recognise.
+    doomed = _owned_or_404(await store.get_subscription(subscription_id), caller)
     if not await store.delete_subscription(subscription_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such subscription")
+
+    if caller.owner_account_id:
+        await iam_store.record_audit(
+            account_id=caller.owner_account_id,
+            action=AuditAction.WEBHOOK_DELETED,
+            target_id=subscription_id,
+            detail=(doomed or {}).get("url"),
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+
+    background.add_task(
+        _notify_webhook_change,
+        caller,
+        endpoint_url=(doomed or {}).get("url") or subscription_id,
+        created=False,
+        request=request,
+    )
 
 
 @router.post(
