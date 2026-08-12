@@ -681,7 +681,9 @@ config: ## Show the resolved compose config
 validate: ## Validate every compose permutation
 	@$(COMPOSE) config >/dev/null && echo "base            OK"
 	@$(COMPOSE_DEV) config >/dev/null && echo "+ dev override  OK"
-	@$(COMPOSE) --profile signal config >/dev/null \
+	@$(COMPOSE) --profile ui config >/dev/null \
+	  && echo "+ ui profile    OK"
+	@$(COMPOSE) --profile signal --profile ui config >/dev/null \
 	  && echo "+ all profiles  OK"
 #
 # The Dokploy manifest is deployed by pasting it into a panel, so nothing else would ever parse it.

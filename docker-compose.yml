@@ -437,60 +437,66 @@ services:
     networks: [shelter]
 
   # ---------------------------------------------------------------------------
-  # The web UI — DISABLED BY DEFAULT. Uncomment the block below to run it here.
+  # The web UI — behind the `ui` PROFILE, so it is opt-in rather than commented out.
   # ---------------------------------------------------------------------------
   #
-  # This stack ships the BACKEND ONLY. `docker compose up -d` gives you the API,
-  # both worker pools and all state — a stable, self-contained backend service.
+  #     docker compose up -d                      backend only  (the default)
+  #     docker compose --profile ui up -d --build  the WHOLE product, incl. the portal
   #
-  # The frontend is deliberately not part of it, for two reasons:
+  # ## Why a profile rather than a commented-out block
   #
-  #   1. **Netlify is the production frontend** (`frontend/netlify.toml`). Running it
-  #      here as well means two deployment paths for the same app, and the container
-  #      one is the path nobody tests.
-  #   2. **Local frontend work wants `npm run dev`**, not a rebuilt image. Hot reload,
-  #      real error overlays, and a 2-second feedback loop instead of a Docker build.
-  #      A container in the default stack actively gets in the way of that — it holds
-  #      port 3000, so `npm run dev` fails to bind.
+  # It was commented out, and the reasoning was sound for a developer: `npm run dev` gives hot
+  # reload and a 2-second feedback loop, and a container holding port 3000 stops it binding.
   #
-  # For local frontend development (Node must be >=20 and <25 — Node 26 ships an npm
-  # that crashes here):
+  # But it is wrong for anyone *evaluating* the product. A reviewer wants the whole thing running
+  # in one command, and "uncomment forty lines of YAML first" is a step that can be got wrong —
+  # and silently, because a mis-indented block yields a confusing compose error rather than a
+  # missing frontend. A profile keeps the default lean AND makes the full stack one flag.
   #
-  #     nvm use 24
-  #     cd frontend && npm install && npm run dev      # :3000
+  # ## The key here must be a SCOPED service-account key
   #
-  # To run it in this stack instead, uncomment the service below and:
+  # `SHELTER_API_KEY` was `${API_KEY:-}` — the legacy shared key. `lib/api.ts` picks its header by
+  # prefix (`shltky…` -> X-SHELTER-API-Key, anything else -> the deprecated X-SHELTER-Key), and the
+  # legacy header is refused outright once IAM is configured. The symptom is precise and misleading:
+  # sign-in works, because `/iam/*` uses the session cookie, and then the alert feed, Monitoring
+  # Areas and the area picker all return 401.
   #
-  #     docker compose up -d --build frontend
+  # Mint one after the stack is up:
   #
-  # SHELTER_API_URL points at the compose service name, not localhost: the browser
-  # never calls the API directly. `lib/api.ts` is `server-only` and runs inside the
-  # container, which is what keeps the API key off the client.
+  #     make iam-service-account NAME=local-frontend EMAIL=you@example.com
   #
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #     args:
-  #       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
-  #   environment:
-  #     SHELTER_API_URL: http://api:8000
-  #     SHELTER_API_PREFIX: ${API_PREFIX:-/shelter/v1/api}
-  #     # Must match API_KEY in .env, or every write is rejected. Read at request
-  #     # time, never baked into the image.
-  #     SHELTER_API_KEY: ${API_KEY:-}
-  #     # The address mail actually arrives from, shown on /auth/pending so a subscriber
-  #     # can allow-list it. Defaults to BREVO_SENDER_EMAIL so the portal cannot advise
-  #     # allow-listing an address the backend does not send from — which it did, naming a
-  #     # non-existent `alerts@shelter.zerorate.io`.
-  #     SHELTER_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-no-reply@zerorate.io}
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     api:
-  #       condition: service_started
-  #   restart: unless-stopped
-  #   networks: [shelter]
+  # then put it in `.env` as SHELTER_API_KEY and restart this service. Without it the portal still
+  # loads and signs in; only the pages needing a platform credential are empty.
+  #
+  # SHELTER_API_URL is the compose service name, not localhost: the browser never calls the API
+  # directly. `lib/api.ts` is `server-only` and runs inside this container, which is what keeps the
+  # key off the client.
+  frontend:
+    profiles: [ui]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* are inlined at BUILD time, so this cannot be injected later.
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+    environment:
+      SHELTER_API_URL: http://api:8000
+      SHELTER_API_PREFIX: ${API_PREFIX:-/shelter/v1/api}
+      # A SCOPED key (`shltky…`), falling back to the legacy one so an existing .env still
+      # starts. See the note above for why the fallback only half-works.
+      SHELTER_API_KEY: ${SHELTER_API_KEY:-${API_KEY:-}}
+      # The address mail actually arrives from, shown on /auth/pending so a subscriber can
+      # allow-list it. Defaults to BREVO_SENDER_EMAIL so the portal cannot advise allow-listing
+      # an address the backend does not send from — which it did, naming a non-existent
+      # `alerts@shelter.zerorate.io`.
+      SHELTER_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-no-reply@zerorate.io}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    networks: [shelter]
 
   # Prints where to connect, once everything is actually healthy.
   #
@@ -547,8 +553,9 @@ services:
         echo "     API docs      http://localhost:8000/shelter/v1/api/docs"
         echo "     Partner docs  http://localhost:8000/shelter/v1/api/dev-docs"
         echo "     Health        http://localhost:8000/shelter/v1/api/health"
-        echo "     Frontend      cd frontend && nvm use 24 && npm run dev  (:3000)"
-        echo "                   not in this stack by design — see docker-compose.yml"
+        echo "     Portal        http://localhost:${FRONTEND_PORT:-3000}    (needs --profile ui)"
+        echo "                   docker compose --profile ui up -d --build"
+        echo "                   or, for hot reload: cd frontend && nvm use 24 && npm run dev"
         echo ""
         echo "   Track A · Agricultural Intelligence is LIVE."
         echo "   Environmental and Public Health Intelligence: next phase."

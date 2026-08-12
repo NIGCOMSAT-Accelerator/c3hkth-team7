@@ -315,24 +315,56 @@ def test_env_file_is_optional():
     assert "env_file: [.env]" not in compose
 
 
-def test_frontend_block_stays_commented_and_documented():
-    """Superseded `test_frontend_is_in_the_default_stack`.
+def test_the_frontend_is_opt_in_but_not_commented_out():
+    """The frontend must not start by DEFAULT, and must not require editing YAML to start.
 
-    That earlier test asserted the frontend WAS in the default stack. The decision was
-    reversed: this stack is the backend service, Netlify is the production frontend, and
-    a container here holds port 3000 so `npm run dev` cannot bind — which actively
-    blocks local frontend work.
+    ## The history, because this assertion has now been reversed twice
 
-    The block is kept commented rather than deleted so a developer who does want it can
-    uncomment one section instead of reconstructing it.
+    `test_frontend_is_in_the_default_stack` asserted it was always on. That was reversed to
+    "must be commented out", for a real reason: a container here holds port 3000, so
+    `npm run dev` cannot bind, which actively blocks frontend work.
+
+    Both versions optimised for a developer. Neither served a REVIEWER, who wants the whole
+    product in one command — and "uncomment forty lines of YAML first" is a step that can be got
+    wrong silently, because a mis-indented block yields a confusing compose error rather than a
+    visibly missing service.
+
+    A `profiles: [ui]` marker satisfies both, so the invariant is now the *behaviour* rather than
+    the syntax:
+
+        docker compose up -d                       -> no frontend, port 3000 free
+        docker compose --profile ui up -d --build  -> the whole product
+
+    The port stays overridable (`FRONTEND_PORT`) because 3000 is the commonest occupied port on a
+    developer machine, and a bind clash aborts the entire `up`.
     """
     compose = _compose()
 
-    assert "# frontend:" in compose, (
-        "the commented frontend service must remain, so it can be re-enabled"
+    assert "\n  frontend:" in compose, (
+        "the frontend service must be present and declarative, not commented out — a reviewer "
+        "should not have to edit YAML to run the product"
     )
-    assert "\n  frontend:" not in compose, "the frontend must not be active"
-    # And the reasoning must travel with it.
+
+    # Present, but NOT in the default set. That is what keeps port 3000 free for `npm run dev`.
+    # Up to the next TOP-LEVEL service key (two spaces, a name, a colon, end of line).
+    # `split("\n  ", 1)` was wrong: it matches the very next indented line and yields "".
+    import re as _re
+
+    rest = compose.split("\n  frontend:")[1]
+    boundary = _re.search(r"^  [a-z][a-z0-9-]*:$", rest, _re.M)
+    frontend = rest[: boundary.start()] if boundary else rest
+    assert "profiles:" in frontend and "ui" in frontend, (
+        "the frontend has no `ui` profile, so `docker compose up -d` would start it and hold "
+        "port 3000 — which stops `npm run dev` binding and blocks frontend work"
+    )
+
+    # The host port must be overridable: a hard-coded 3000 makes a common conflict fatal.
+    assert "FRONTEND_PORT" in frontend, (
+        "the host port is hard-coded, so a machine already using 3000 cannot start the stack "
+        "at all — the bind failure aborts the whole `up`"
+    )
+
+    # And the hot-reload alternative must still be documented where someone will read it.
     assert "npm run dev" in compose
 
 
@@ -466,11 +498,15 @@ def test_workers_do_not_inherit_the_api_healthcheck():
 
 
 def test_frontend_is_not_in_the_default_stack():
-    """This stack is the backend service.
+    """This stack is the backend service by default.
 
-    The frontend is commented out deliberately: Netlify is the production frontend, and
-    local frontend work wants `npm run dev` for hot reload — a container in the default
-    stack holds port 3000 and makes that fail to bind.
+    The frontend is declared but sits behind `profiles: [ui]`, so `docker compose up -d` does not
+    start it. That is what keeps port 3000 free for `npm run dev`, which local frontend work needs
+    for hot reload.
+
+    Asserted through `docker compose config --services` rather than by reading the YAML, because
+    the question is what compose ACTUALLY resolves — a profile marker in the wrong place parses
+    fine and still starts the service.
     """
     import subprocess
 
@@ -483,10 +519,22 @@ def test_frontend_is_not_in_the_default_stack():
 
     services = set(result.stdout.split())
     assert "frontend" not in services, (
-        "the frontend must stay commented out — it is not part of the backend stack"
+        "the frontend starts by default, so it holds port 3000 and `npm run dev` cannot bind. "
+        "It must stay behind `profiles: [ui]`."
     )
     # The backend surface must still be complete.
     assert {"api", "worker", "worker-analyst", "postgres", "dragonfly", "minio"} <= services
+
+    # And the opt-in must actually work, or the reviewer path in USAGE §3.0 is a dead command.
+    with_ui = subprocess.run(
+        ["docker", "compose", "--profile", "ui", "config", "--services"],
+        capture_output=True, text=True, cwd="..",
+    )
+    assert with_ui.returncode == 0, with_ui.stderr
+    assert "frontend" in set(with_ui.stdout.split()), (
+        "`--profile ui` does not add the frontend, so `docker compose --profile ui up` — the "
+        "command USAGE gives reviewers — starts no portal"
+    )
 
 
 def test_welcome_does_not_advertise_a_service_it_does_not_start():

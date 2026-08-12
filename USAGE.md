@@ -7,8 +7,44 @@ Sub-Saharan Africa. This document covers everything needed to run the system and
 operate it as a user. For the product mission, architecture and data sources, see
 **[README.md](README.md)**.
 
-Verified against the running stack on **2026-08-11**. Every command below was executed;
+Verified against the running stack on **2026-08-12**. Every command below was executed;
 where a command has a caveat, the caveat is stated rather than omitted.
+
+---
+
+## Reviewing this project? Start here
+
+Four commands, one prerequisite (**Docker**), no accounts and no credentials:
+
+```bash
+git clone <repo> && cd c3hkth-team7
+make env                                    # writes .env from the template — no edits needed
+docker compose --profile ui up -d --build   # API + workers + datastores + the web portal
+docker compose logs welcome                 # prints every URL, once the stack is healthy
+```
+
+Then open **http://localhost:3000** and sign up.
+
+Verified from a clean checkout with no `.env`, no model weights and no GeoIP database — the three
+artefacts that are gitignored. Result: all seven services healthy, migrations applied, and a live
+Sentinel-2 search returning real scenes from the last few days.
+
+**Two things will look "broken" and are not.** Both are deliberate degradation, and both are
+stated in the output rather than hidden:
+
+  * **Confidence reads 0.55, not 0.88.** The trained weights are gitignored, so inference falls
+    back to documented physical thresholds (SAR VV < −16 dB, NDVI < 0.35). Threshold science, not
+    silence.
+  * **The activity log says "Local network" and "Desktop".** The GeoIP database is gitignored too,
+    and an unknown location is reported as unknown rather than guessed.
+
+**One thing needs a free account:** signing in. Identity lives in MongoDB, so set `MONGO_URL` in
+`.env` (a free Atlas cluster is enough) and re-run the `up`. Without it the satellite pipeline runs
+normally and only the portal's signup returns 503 — the two are independent by design.
+
+Full walkthrough, including the two non-Docker paths, in **[§3.0](#30-three-complete-paths-start-to-finish)**.
+If something misbehaves, **[§10](#10-troubleshooting)** lists every failure we actually hit,
+with the fix.
 
 ---
 
@@ -187,14 +223,71 @@ the satellite pipeline keeps running — the pipeline and identity are independe
 
 ## 3. Build & run locally
 
-### 3.0 Two complete paths, start to finish
+### 3.0 Three complete paths, start to finish
 
-Both end with the portal on **http://localhost:3000** and a real satellite assessment. Pick one.
+All three end with the portal on **http://localhost:3000** and a real satellite assessment from
+live open data. Pick one.
 
-#### Path A — Docker for the backend, Node for the frontend *(recommended)*
+| Path | Needs | Best for |
+|---|---|---|
+| **A — everything in Docker** | Docker only | **Evaluating the product.** One command, whole stack |
+| **B — Docker backend + Node frontend** | Docker, Node 20–24 | Frontend work (hot reload) |
+| **C — no Docker at all** | Python 3.10–3.12, Node, GDAL | Backend work, or a machine without Docker |
 
-Needs only **Docker** and **Node 20–24**. No Python, no GDAL, no geospatial toolchain on your
-machine.
+#### Path A — the whole stack in Docker *(start here)*
+
+Needs **only Docker**. No Python, no Node, no GDAL, no geospatial toolchain, no accounts.
+
+```bash
+git clone <repo> && cd c3hkth-team7
+make env                                    # writes .env from the template — no edits needed
+docker compose --profile ui up -d --build   # the WHOLE product: API, workers, stores, portal
+make health                                 # every store should read "up"
+docker compose logs welcome                 # prints the URLs, once everything is healthy
+```
+
+Then open **http://localhost:3000**.
+
+The first build takes several minutes — the API image installs PyTorch and bakes the trained
+model weights. Subsequent starts are seconds.
+
+**Port 3000 already taken?** (`next dev`, Grafana and Dokploy's own UI all use it.) Set
+`FRONTEND_PORT=3200` in `.env` and re-run — a bind clash otherwise aborts the whole `up` with an
+error that names Docker rather than the conflict.
+
+Two things to know before you sign up:
+
+  * **Sign-in needs `MONGO_URL`.** Identity lives in MongoDB; a free Atlas cluster is enough.
+    Without it the satellite pipeline runs perfectly and the portal's signup returns 503 — the two
+    are independent by design. Set it in `.env`, then
+    `docker compose --profile ui up -d --force-recreate api frontend`.
+  * **The portal needs its own scoped key** for the area picker and the alert feed. After the stack
+    is up:
+
+    ```bash
+    make iam-service-account NAME=local-frontend EMAIL=you@example.com
+    # copy the printed shltky… into .env as SHELTER_API_KEY, then:
+    docker compose --profile ui up -d --force-recreate frontend
+    ```
+
+    Without it you can still sign up and sign in; only those pages come back empty. See §2.6 for
+    why the *kind* of key matters.
+
+To build the images without running anything — the multi-arch build used for releases:
+
+```bash
+make images        # linux/amd64 + linux/arm64, cache only
+make image-local   # this machine's architecture, loaded into Docker so `docker run` sees it
+```
+
+On Apple Silicon, enable **Settings → General → "Use Rosetta for x86_64/amd64 emulation"** before
+`make images`. Under QEMU the Next.js build segfaults (`qemu: uncaught target signal 11`) and even
+`--webpack` stalls indefinitely; with Rosetta the amd64 build compiles in about 6 seconds.
+
+#### Path B — Docker for the backend, Node for the frontend
+
+Needs **Docker** and **Node 20–24**. Choose this when you are editing the frontend: `npm run dev`
+gives hot reload and a 2-second feedback loop that a container rebuild cannot.
 
 ```bash
 # 1. Backend — one command, no credentials needed
@@ -222,7 +315,7 @@ npm run dev                    # http://localhost:3000
 Then sign up in the browser, define a plot, and press **Check now** on `/portal/areas` — that runs
 a live STAC search, windowed COG reads and two model forward passes, and takes 10–40 seconds.
 
-#### Path B — no Docker at all
+#### Path C — no Docker at all
 
 Needs **Python 3.10–3.12** (torch publishes no 3.13/3.14 wheels), **Node 20–24**, and GDAL/PROJ on
 the host for `rasterio`/`pyproj`. You also need Postgres, Redis-compatible storage and S3-compatible
@@ -250,7 +343,7 @@ uvicorn app.main:app --reload  # :8000, API + the autonomous watch loop
 python -m app.queue.worker     # all five stages in one process
 ```
 
-Frontend is identical to Path A step 4.
+The frontend is identical to Path B's step 4.
 
 **Without model weights** (`app/ml/weights/*.pt`, gitignored) inference falls back to documented
 physical thresholds — SAR VV < −16 dB, NDVI < 0.35 — at confidence **0.55** instead of 0.88. That
@@ -1029,6 +1122,14 @@ break by accident:
 | Every cache call errors | Dragonfly needs `--dbnum=2` or higher, or `SELECT 1` fails |
 | `pending_migrations` non-empty | `make migrate`. Only the API container auto-migrates |
 | Container restart-loops on boot | `app/preflight.py` refuses production with dev defaults. Read the log line — it names the setting |
+| `Bind for 0.0.0.0:3000 failed: port is already allocated` | Something else holds 3000 — `next dev`, Grafana, Dokploy's UI. Set `FRONTEND_PORT=3200` in `.env`. The whole `up` aborts on this, so it looks like a Docker fault rather than a conflict |
+| `Bind for 0.0.0.0:8000 failed` | Another SHELTER stack is running. `docker compose down` in the other checkout first |
+| `Failed to resolve 'minio'` / `'shelter-api'` from inside a container | A previous `up` failed part-way and left a container attached to **no** network. `docker compose down` then `up` again — recreating is the fix, restarting is not. Verified: the API container had an empty network list after a port-bind failure |
+| Portal loads and signs in, but Monitored Areas and the area picker are empty (401) | `SHELTER_API_KEY` is missing or is the legacy `API_KEY`. `lib/api.ts` picks its header by prefix, and the deprecated one is refused once IAM is configured. Mint a scoped key — §2.6 |
+| Signup returns 503 | `MONGO_URL` is unset. Identity lives in MongoDB; the satellite pipeline is unaffected and keeps running |
+| `qemu: uncaught target signal 11` during `make images` | Apple Silicon building amd64 under QEMU. Enable Docker Desktop → Settings → General → "Use Rosetta for x86_64/amd64 emulation" and restart Docker |
+| Confidence reads 0.55, not 0.88 | Model weights are gitignored, so a clone has none. Inference falls back to documented physical thresholds (SAR VV < −16 dB, NDVI < 0.35) — deliberate, and the honest degradation |
+| Activity log shows "Local network" and "Desktop" | Expected from a clone: the GeoIP database is gitignored, and the value is honest rather than invented. City lookup needs `make geoip` |
 | Models report confidence 0.55 | Weights absent. Expected in a git-only tree; a built image has them (`make fresh-check` proves both directions) |
 | Portal shows raw IPs | `city.mmdb` absent. Gitignored but dockerbaked |
 | Assessment returns 0% on a cloudy day | Correct. NaN means "no data" and propagates; a fully clouded scene must not report 0% stress |

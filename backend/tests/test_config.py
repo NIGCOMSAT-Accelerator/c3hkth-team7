@@ -145,6 +145,23 @@ COMPOSE_LEVEL_KEYS: dict[str, str] = {
         "Image tag paired with SHELTER_IMAGE. Defaults to latest so a fresh clone with "
         "no .env resolves to the locally built image."
     ),
+    "frontend_port": (
+        "Host port for the portal under `--profile ui`. Overridable because 3000 is the "
+        "commonest occupied port on a developer machine — `next dev`, Grafana and Dokploy's "
+        "own UI all take it — and a bind failure aborts the whole `up` with an error that "
+        "names Docker rather than the conflict."
+    ),
+    "shelter_api_key": (
+        "The scoped service-account key the frontend container presents. Read by compose "
+        "into the frontend service's environment, not by pydantic — the BACKEND never reads "
+        "it, which is the whole point: it is the credential the portal sends, not one the "
+        "API holds."
+    ),
+    "next_public_site_url": (
+        "Baked into the frontend image at BUILD time as a compose build arg. NEXT_PUBLIC_* "
+        "is inlined by Next.js at compile time, so it cannot be injected at run time and is "
+        "not a backend setting at all."
+    ),
 }
 
 
