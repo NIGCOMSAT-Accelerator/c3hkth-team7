@@ -573,6 +573,16 @@ class Settings(BaseSettings):
     photon_cache_ttl_seconds: int = 86_400
     #: Max suggestions returned per keystroke. Ten is already more than a phone can show.
     photon_max_results: int = 8
+    #: Comma-separated ISO-3166 alpha-2 codes to restrict suggestions to. Empty searches globally.
+    #:
+    #: A HARD filter, unlike the lat/lon proximity bias, because measured against the live instance
+    #: the bias alone is not enough: "Argun" returned a village in Uzbekistan, two in Türkiye and a
+    #: town in Chechnya ahead of Argungu, Kebbi. Exact name-similarity beats proximity, and a farmer
+    #: offered four foreign places concludes the search is broken.
+    #:
+    #: Configurable because the platform's remit is Sub-Saharan Africa rather than one country — a
+    #: deployment serving both sets `ng,gh`.
+    photon_countries: str = "ng"
     #: Suggestion requests per credential per hour. 0 disables the ceiling.
     #:
     #: Deliberately high: this is a keystroke endpoint, and a subscriber outlining three plots

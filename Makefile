@@ -481,7 +481,7 @@ buildx: ## Create/select the multi-arch builder (idempotent)
 # **Deleting the tags in the registry is a separate, manual step.** Removing the flags
 # stops new cache artefacts being written; it does not reclaim what earlier releases
 # already pushed. Delete the `buildcache` tag on each repository by hand — see
-# `make prune-remote-help`.
+# `make drop-buildcache`.
 #
 # `latest` used to be pushed alongside it, and it cost real money and real clarity:
 #
@@ -689,6 +689,20 @@ retag: ## Alias a pushed tag without rebuilding: make retag TAG=… ALIAS=latest
 	  echo "==> $$img:$(TAG)  ->  $$img:$(ALIAS)"; \
 	  docker buildx imagetools create -t "$$img:$(ALIAS)" "$$img:$(TAG)" \
 	    && echo "    aliased (manifest copied registry-side; no layers re-uploaded)"
+
+.PHONY: drop-buildcache
+drop-buildcache: ## Delete the leftover :buildcache tags from the registry (Docker Hub)
+	@# Removing the --cache-to flags stops NEW cache artefacts being written. It does not
+	@# reclaim what earlier releases already pushed, so this deletes those tags.
+	@#
+	@# Docker Hub has no imagetools verb for deletion — `buildx imagetools` can create and
+	@# inspect a tag but not remove one — so this uses the v2 API and needs a PAT with
+	@# delete permission. Same credential as `make release-*`.
+	@#
+	@# Nothing else references these tags: the images are pinned by $(TAG) in the compose
+	@# manifests, so deleting the cache cannot affect a running deployment.
+	@test -n "$(SHELTER_ORG)" || { echo "usage: make drop-buildcache SHELTER_ORG=<org> [SHELTER_REPO=<repo>]"; exit 1; }
+	@printf 'Docker Hub username: '; read -r user; 	  printf 'Docker Hub PAT (delete scope): '; stty -echo; read -r pat; stty echo; echo; 	  tok=$$(curl -s -H 'Content-Type: application/json' 	      -d "{\"username\":\"$$user\",\"password\":\"$$pat\"}" 	      https://hub.docker.com/v2/users/login/ | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'); 	  test -n "$$tok" || { echo "login failed"; exit 1; }; 	  for repo in $(if $(SHELTER_REPO),$(SHELTER_REPO),shelter-api shelter-ui); do 	    code=$$(curl -s -o /dev/null -w '%{http_code}' -X DELETE 	      -H "Authorization: JWT $$tok" 	      "https://hub.docker.com/v2/repositories/$(SHELTER_ORG)/$$repo/tags/buildcache/"); 	    case "$$code" in 	      204) echo "  deleted  $(SHELTER_ORG)/$$repo:buildcache" ;; 	      404) echo "  absent   $(SHELTER_ORG)/$$repo:buildcache (nothing to do)" ;; 	      *)   echo "  FAILED   $(SHELTER_ORG)/$$repo:buildcache (HTTP $$code)" ;; 	    esac; 	  done
 
 .PHONY: config
 config: ## Show the resolved compose config

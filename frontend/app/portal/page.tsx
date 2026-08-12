@@ -193,14 +193,21 @@ export default async function PortalOverviewPage({
 
                 <p className="pcard__foot">
                   <a href="/portal/alerts">All alerts</a> ·{" "}
-                  <a href="/dashboard">Live map</a>
+                  {/* Matches the top nav. A link list is navigation, so it takes the nav label. */}
+                  <a href="/dashboard">Ops Dash</a>
                 </p>
               </>
             ) : (
               <p className="muted" style={{ margin: 0, fontSize: 14 }}>
                 Nothing yet. Silence means no hazard crossed the alert threshold for your
                 area — assessments still run on every pass, and you can see them on the{" "}
-                <a href="/dashboard">live map</a>.
+                {/*
+                  PROSE, so it stays descriptive rather than taking the nav label. "you can see
+                  them on the operations dashboard" reads naturally; "on the Ops Dash" reads like
+                  a menu item dropped into a sentence, and this paragraph is reassurance for a
+                  subscriber with no alerts — the one place clipped internal shorthand is worst.
+                */}
+                <a href="/dashboard">operations dashboard</a>.
               </p>
             )}
           </section>

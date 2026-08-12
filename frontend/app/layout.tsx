@@ -110,7 +110,14 @@ export default async function RootLayout({
               {account ? (
                 <>
                   <a href="/portal">Portal</a>
-                  <a href="/dashboard">Live map</a>
+                  {/*
+                    "Ops Dash", not "Live map" — the page's own <h1> is "Operations dashboard",
+                    and the label was describing one component rather than the destination. The
+                    map is a panel on it; the page also carries the 7-day outlook, the score
+                    drivers, recent alerts and delivery receipts, none of which a visitor would
+                    expect to find behind "map".
+                  */}
+                  <a href="/dashboard">Ops Dash</a>
                   {/*
                     Developer docs, for aggregators only.
                     

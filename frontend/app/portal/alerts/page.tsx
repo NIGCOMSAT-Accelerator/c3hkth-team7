@@ -57,7 +57,8 @@ export default async function MyAlertsPage() {
             Your area is assessed on every satellite pass. Nothing has crossed the alert
             threshold, which is the outcome you want — you are contacted only when there is
             something to act on. Current assessments are on the{" "}
-            <a href="/dashboard">live map</a>.
+            {/* Prose, so descriptive rather than the nav label — see portal/page.tsx. */}
+            <a href="/dashboard">operations dashboard</a>.
           </p>
         </section>
       ) : (

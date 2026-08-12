@@ -66,8 +66,10 @@ __all__ = ["ATTRIBUTION", "Suggestion", "available", "suggest"]
 #: Nigeria's rough centre, used to bias results toward the service area.
 #:
 #: Photon's `lat`/`lon` are a *preference*, not a filter, so this improves ordering without
-#: excluding anything — a partner searching Ghana still gets Ghanaian results, just lower. A
-#: hard filter would be wrong: the platform's remit is Sub-Saharan Africa, not one country.
+#: excluding anything. Measured against the live instance, it is **not enough on its own**:
+#: typing "Argun" returned a village in Uzbekistan, two in Türkiye and a town in Chechnya —
+#: ahead of Argungu, Kebbi. Proximity loses to name-similarity when the exact string matches
+#: somewhere else, and a farmer offered four foreign places concludes the search is broken.
 _BIAS_LAT = 9.0
 _BIAS_LON = 8.0
 
@@ -232,12 +234,26 @@ async def suggest(query: str, *, limit: int | None = None) -> list[Suggestion]:
         return []
 
     count = max(1, min(limit or settings.photon_max_results, settings.photon_max_results))
-    params = {
+    params: dict[str, object] = {
         "q": query,
         "limit": count,
         "lat": _BIAS_LAT,
         "lon": _BIAS_LON,
     }
+
+    # A HARD country filter on top of the soft bias, because the bias alone does not hold.
+    #
+    # With `countrycode=NG`, "Argun" returns Argungu / Argungu Native / Argungu Road — all
+    # Nigerian. Without it, the first Nigerian result is off the end of the list.
+    #
+    # Configurable rather than hardcoded, and **comma-separated**, because the platform's remit is
+    # Sub-Saharan Africa rather than one country: a deployment serving Ghana and Nigeria sets
+    # `PHOTON_COUNTRIES=ng,gh`. Empty searches globally, which is the right escape hatch for an
+    # aggregator with cross-border customers — the cost is that a prefix matching a European city
+    # can outrank the district next door.
+    countries = (settings.photon_countries or "").strip()
+    if countries:
+        params["countrycode"] = countries.lower()
 
     cache_key = f"{_PREFIX}:{json.dumps(params, sort_keys=True)}"
     try:

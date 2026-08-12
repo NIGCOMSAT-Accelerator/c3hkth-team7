@@ -3699,6 +3699,27 @@ a.chip:hover {
   justify-content: space-between;
 }
 
+/* The name+crop column must be allowed to SHRINK.
+   
+   A flex item defaults to `min-width: auto`, which means it refuses to become narrower than its
+   longest unbreakable run of text. Reported from the portal: a long crop list held this column
+   open and the overflow ran over the AOI reference id on the line below.
+   
+   MEASURED, because the obvious repro does not reproduce it. A spaced list ("maize, cowpea,
+   sorghum, …") wraps fine — it has break opportunities. What overflows is a list typed with NO
+   space after the comma, "maize,cowpea,sorghum,groundnut,rice,cassava", or slash-separated —
+   which is how people actually type lists. That is one unbreakable run, so it overflowed BOTH the
+   crop line and the facts line carrying the id. Verified headless at a 360px column: overflow
+   before, none after, across four input shapes.
+   
+   `min-width: 0` is the fix that lets the column narrow; `flex: 1 1 auto` lets it take the space
+   that is actually free. Without the first, the second has nothing to work with — this pairing is
+   the standard flexbox-overflow remedy and the omission is the standard cause. */
+.plot__ident > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .plot__name {
   margin: 0;
   font-size: 15.5px;
@@ -3711,6 +3732,11 @@ a.chip:hover {
   margin: 2px 0 0;
   font-size: 12.5px;
   color: var(--text-secondary);
+  /* Wrap rather than clip. A crop list is the subscriber's own data and every entry matters for
+     the advisory, so truncating with an ellipsis would hide something they entered deliberately —
+     the card growing a line is the cheaper cost. `anywhere` because a single long unspaced entry
+     (a variety code) would otherwise still overflow, which is what `break-word` alone permits. */
+  overflow-wrap: anywhere;
 }
 
 .plot__facts {
@@ -3718,6 +3744,19 @@ a.chip:hover {
   font-size: 11.5px;
   color: var(--text-muted);
   line-height: 1.6;
+  /* The facts line mixes prose with two `.mono` spans (the centre coordinates and the AOI id).
+     Neither contains a space, so without this the id is an unbreakable run that overflows the card
+     on a narrow phone instead of wrapping to the next line. */
+  overflow-wrap: anywhere;
+}
+
+/* Never let the status pill be the thing that gets squeezed.
+   
+   It is two words and a dot; shrinking it wraps "Active" onto its own line under the dot, which
+   reads as a rendering fault. Better that the long text beside it wraps — which the rules above
+   now allow. */
+.plot__ident > .glasspill {
+  flex: 0 0 auto;
 }
 
 .plot__editing {

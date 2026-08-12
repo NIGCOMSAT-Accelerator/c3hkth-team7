@@ -240,6 +240,49 @@ async def test_the_result_count_is_capped_by_config(monkeypatch):
     assert captured["limit"] == "2"
 
 
+async def test_suggestions_are_restricted_to_the_configured_countries(monkeypatch):
+    """**The proximity bias alone is not enough**, measured against the live instance.
+
+    Photon's `lat`/`lon` are a preference, not a filter. Typing "Argun" returned a village in
+    Uzbekistan, two in Türkiye and a town in Chechnya — all ahead of Argungu, Kebbi — because exact
+    name-similarity outranks proximity. A farmer offered four foreign places concludes the search is
+    broken.
+
+    `countrycode=ng` fixes it outright: the same query then returns Argungu / Argungu Native /
+    Argungu Road. Sent as a request parameter rather than filtered locally, so the limit is spent on
+    results that can actually be used.
+    """
+    captured: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(request.url.params)
+        return httpx.Response(200, json=PHOTON_BODY)
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(suggest.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(suggest.settings, "photon_url", "http://photon.test", raising=False)
+    monkeypatch.setattr(suggest.settings, "photon_countries", "ng", raising=False)
+    monkeypatch.setattr(suggest.cache, "get_text", _none)
+    monkeypatch.setattr(suggest.cache, "set_text", _none)
+
+    await suggest.suggest("Argun")
+    assert captured.get("countrycode") == "ng"
+
+    # Empty must search globally — the escape hatch for an aggregator with cross-border customers.
+    captured.clear()
+    monkeypatch.setattr(suggest.settings, "photon_countries", "", raising=False)
+    await suggest.suggest("Argun")
+    assert "countrycode" not in captured
+
+
 def test_suggestions_carry_no_geometry():
     """**A safety property, not tidiness.**
 

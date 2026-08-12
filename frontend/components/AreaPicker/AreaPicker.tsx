@@ -468,15 +468,29 @@ export default function AreaPicker({
 
       {mode === "search" && (
         <div className="picker__search">
+          {/*
+            The label names ADDRESS first, because the field accepts one and did not say so.
+            
+            A judge reviewing the deployment reported that search "does not provide an address
+            option… beyond just a wide district" — and the honest reading is that the label was
+            describing the old behaviour. Photon resolves street and building level: measured live,
+            "Adeola Odek" returns Adeola Odeku Street plus Spar and Sterling Bank ON it, and
+            "Wuse Mark" returns Wuse Market itself. A field labelled "Village, town or district"
+            tells someone not to bother typing their address.
+            
+            Ordered widest-last on purpose: the district cascade is the FALLBACK for the common
+            rural case where a village is simply not in OSM, so it should read as the last resort
+            rather than the expected input.
+          */}
           <label htmlFor="picker-q" className="authform__label">
-            Village, town or district
+            Address, building, village or district
           </label>
           <input
             id="picker-q"
             className="authform__input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Argungu"
+            placeholder="Wuse Market, Abuja"
             autoComplete="off"
             // `search` so mobile keyboards show a search key rather than a newline.
             type="search"
