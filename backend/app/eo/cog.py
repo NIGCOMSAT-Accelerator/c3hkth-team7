@@ -83,7 +83,13 @@ class CogReadError(RuntimeError):
 #:
 #: `jrc-gsw` occurrence is the same shape of data — a per-pixel percentage used as a threshold mask
 #: for permanent water — and is read through this same function by `eo/terrain.permanent_water_mask`.
-CATEGORICAL_BANDS: frozenset[str] = frozenset({"scl", "occurrence", "extent", "seasonality"})
+#:
+#: `texture_class` is iSDAsoil's USDA soil-texture code (1-12) — a category exactly like `scl`, and
+#: averaging codes would invent a texture class that does not exist, same failure as the cloud-mask
+#: bug above. Read by `eo/soil_texture.py`.
+CATEGORICAL_BANDS: frozenset[str] = frozenset(
+    {"scl", "occurrence", "extent", "seasonality", "texture_class"}
+)
 
 
 def _resampling_for(band: str | None) -> Resampling:

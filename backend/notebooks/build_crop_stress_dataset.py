@@ -29,6 +29,39 @@ stress rather than agronomic truth. That is stated in the exported metadata and 
 NDVI, NDMI, NDWI from Sentinel-2 L2A surface reflectance, cloud-masked with SCL using
 nearest-neighbour — identical to `agents/analyst._analyze_optical`. Any difference here is
 training/serving skew, which is the failure that makes a good validation score meaningless.
+
+`x` carries a FOURTH channel, `ndvi - baseline` (the anomaly), matching `CropStressNet`'s
+`in_channels=4` and the stack order `predict_crop_stress` builds at serving time
+(`ndvi, ndmi, ndwi, anomaly` — see `app/ml/inference.py::CROP_CHANNELS`). An earlier version of
+this script wrote only 3 channels, which loads fine at `model(xb)` and then crashes on the very
+first forward pass with a conv-shape mismatch — the cheap failure mode. Silently misordering the
+four instead of dropping one would have been the expensive one: the model would train and serve
+without error while attributing a decision to the wrong input.
+
+## Landsat 8/9 fallback, added because Sentinel-2-only starved several AOIs
+
+A first run against Sentinel-2 alone returned 0 scenes for two of sixteen AOIs (Benin, Yenagoa) and
+1 for several more, in a 40%-cloud, 2-year, 2-window search — Nigeria's cloud cover in the wet-season
+windows this dataset needs is exactly what starves it. `catalogs.chain_for` already treats Landsat
+8/9 (`landsat-c2-l2`, same Element84 STAC endpoint) as the next rung after Sentinel-2 in the live
+optical chain (`app/eo/sources.py`); this script now does the same when a window comes back empty.
+Landsat's asset names and cloud mask differ (`nir08` not `nir`, bit-packed `qa_pixel` not categorical
+`SCL`), handled by `BAND_MAP` and `_cloud_invalid_mask` below.
+
+## The baseline now comes from Digital Earth Africa, not from `samples` itself
+
+The seasonal baseline used to be the median NDVI of whatever live 2024-2025 scenes this exact run
+happened to pull for an (AOI, window) — as few as ONE scene for several AOIs. That is not a
+climatology, it is that scene's own value, and the SAME handful of samples were used both to build
+the baseline and to be labelled against it — a small-N self-referential loop the original audit
+flagged.
+
+Digital Earth Africa publishes `ndvi_anomaly` (an `ndvi_mean` monthly composite plus a precomputed
+standardised anomaly band, `deafrica-services` S3, `af-south-1`, unsigned — verified reachable
+2026-08-14, `Accept-Ranges: bytes`) with monthly coverage since at least 2017. The baseline for each
+(AOI, window) is now the median of `ndvi_mean` across every available year for the calendar months
+that window sits in — an independent, multi-year reference the live-fetched "current" scene is
+compared against, rather than compared against itself.
 """
 
 from __future__ import annotations
@@ -79,10 +112,47 @@ AOIS = [
 YEARS = [2024, 2025]
 WINDOWS = [("06-15", "08-01"), ("09-15", "11-01")]
 
+# Digital Earth Africa's `ndvi_anomaly` monthly composites are calendar-month binned, so the
+# day-level WINDOWS above don't translate directly — each maps to the calendar months with the
+# most overlap. Verified reachable live 2026-08-14: unsigned S3 (`deafrica-services`, af-south-1),
+# `Accept-Ranges: bytes`, monthly coverage since at least 2017.
+DE_AFRICA_STAC = "https://explorer.digitalearth.africa/stac/search"
+DE_AFRICA_S3_PREFIX = "s3://deafrica-services/"
+DE_AFRICA_HTTPS_PREFIX = "https://deafrica-services.s3.af-south-1.amazonaws.com/"
+WINDOW_MONTHS: dict[str, tuple[int, ...]] = {"06-15": (6, 7), "09-15": (9, 10)}
+
 MAX_CLOUD = 40.0
 TILE = 96
 
 SCL_INVALID = (0, 1, 3, 8, 9, 10, 11)
+
+# Sentinel-2-l2a first (finer resolution, the serving primary); Landsat 8/9 C2-L2 as the fallback
+# when a window has no cloud-free Sentinel-2 hit — mirrors `catalogs.chain_for`'s failover order for
+# optical imagery in the live pipeline (`app/eo/sources.py`).
+COLLECTIONS = ("sentinel-2-l2a", "landsat-c2-l2")
+
+# Asset key differs by collection even for the same physical band.
+BAND_MAP: dict[str, dict[str, str]] = {
+    "sentinel-2-l2a": {"red": "red", "green": "green", "nir": "nir", "swir16": "swir16", "qa": "scl"},
+    "landsat-c2-l2": {"red": "red", "green": "green", "nir": "nir08", "swir16": "swir16", "qa": "qa_pixel"},
+}
+
+# Landsat Collection 2 QA_PIXEL is bit-packed, not categorical like SCL. Bits verified against the
+# USGS Collection 2 Level 2 Science Product Guide: 0 fill, 1 dilated cloud, 2 cirrus, 3 cloud,
+# 4 cloud shadow. Unverified against a live Nigerian scene — flag any dataset built on the Landsat
+# rung as such until it has been.
+_QA_PIXEL_INVALID_BITS = (0, 1, 2, 3, 4)
+
+
+def _cloud_invalid_mask(qa: np.ndarray, collection: str) -> np.ndarray:
+    """True where the pixel is cloud/shadow/fill/no-data, for the given collection's QA band."""
+    if collection == "sentinel-2-l2a":
+        return np.isin(qa.astype("int16"), SCL_INVALID)
+    packed = qa.astype("uint16")
+    invalid = np.zeros(packed.shape, dtype=bool)
+    for bit in _QA_PIXEL_INVALID_BITS:
+        invalid |= (packed & (1 << bit)) != 0
+    return invalid
 
 
 def normalised(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -122,9 +192,11 @@ def read_window(href: str, bbox: list[float], nearest: bool = False) -> np.ndarr
         return None
 
 
-async def search(client: httpx.AsyncClient, bbox: list[float], start: str, end: str) -> list[dict]:
+async def search(
+    client: httpx.AsyncClient, collection: str, bbox: list[float], start: str, end: str
+) -> list[dict]:
     body = {
-        "collections": ["sentinel-2-l2a"],
+        "collections": [collection],
         "bbox": bbox,
         "datetime": f"{start}T00:00:00Z/{end}T00:00:00Z",
         "query": {"eo:cloud_cover": {"lt": MAX_CLOUD}},
@@ -138,15 +210,73 @@ async def search(client: httpx.AsyncClient, bbox: list[float], start: str, end: 
         return []
 
 
+async def search_chain(
+    client: httpx.AsyncClient, bbox: list[float], start: str, end: str
+) -> tuple[list[dict], str | None]:
+    """Try each collection in `COLLECTIONS` until one returns features. `(features, collection)`."""
+    for collection in COLLECTIONS:
+        feats = await search(client, collection, bbox, start, end)
+        if feats:
+            return feats, collection
+    return [], None
+
+
+async def _de_africa_baseline(
+    client: httpx.AsyncClient, bbox: list[float], months: tuple[int, ...]
+) -> float | None:
+    """Median NDVI from DE Africa's `ndvi_anomaly` `ndvi_mean` band, across every available year
+    for these calendar months. An independent, multi-year climatological reference — the live
+    2024-2025 pull never contributes to this number, so it is no longer the same handful of
+    samples used both to build the baseline and to be labelled against it.
+
+    Returns None on any failure (search error, no matching months, all-nodata reads) so the caller
+    falls back to the old live-median baseline exactly as if this function did not exist.
+    """
+    try:
+        response = await client.post(
+            DE_AFRICA_STAC,
+            json={"collections": ["ndvi_anomaly"], "bbox": bbox, "limit": 100},
+        )
+        response.raise_for_status()
+        feats = response.json().get("features", [])
+    except Exception:
+        return None
+
+    values: list[float] = []
+    for feat in feats:
+        datetime_str = feat.get("properties", {}).get("datetime", "")
+        try:
+            month = int(datetime_str[5:7])
+        except (ValueError, IndexError):
+            continue
+        if month not in months:
+            continue
+        href = feat.get("assets", {}).get("ndvi_mean", {}).get("href", "")
+        if not href.startswith(DE_AFRICA_S3_PREFIX):
+            continue
+        https_href = DE_AFRICA_HTTPS_PREFIX + href[len(DE_AFRICA_S3_PREFIX) :]
+        arr = read_window(https_href, bbox)
+        if arr is None:
+            continue
+        valid = arr[np.isfinite(arr)]
+        if valid.size:
+            values.append(float(np.median(valid)))
+
+    if not values:
+        return None
+    return float(np.median(values))
+
+
 async def main() -> int:
     samples: list[dict] = []
 
     async with httpx.AsyncClient(timeout=60) as client:
         for name, bbox in AOIS:
             per_aoi = 0
+            per_aoi_landsat = 0
             for year in YEARS:
                 for start_md, end_md in WINDOWS:
-                    feats = await search(
+                    feats, collection = await search_chain(
                         client, bbox, f"{year}-{start_md}", f"{year}-{end_md}"
                     )
                     if not feats:
@@ -155,11 +285,12 @@ async def main() -> int:
                     feature = min(
                         feats, key=lambda f: f["properties"].get("eo:cloud_cover") or 100
                     )
+                    band_map = BAND_MAP[collection]
                     assets = feature.get("assets", {})
                     hrefs = {
-                        band: assets[band]["href"]
-                        for band in ("red", "green", "nir", "swir16", "scl")
-                        if band in assets
+                        band: assets[key]["href"]
+                        for band, key in band_map.items()
+                        if key in assets
                     }
                     if not {"red", "nir"} <= hrefs.keys():
                         continue
@@ -169,22 +300,22 @@ async def main() -> int:
                     import concurrent.futures as _cf
                     with _cf.ThreadPoolExecutor(5) as ex:
                         futs = {
-                            band: ex.submit(read_window, hrefs[band], bbox, band == "scl")
-                            for band in ("red", "green", "nir", "swir16", "scl")
+                            band: ex.submit(read_window, hrefs[band], bbox, band == "qa")
+                            for band in ("red", "green", "nir", "swir16", "qa")
                             if band in hrefs
                         }
                         got = {b: f.result() for b, f in futs.items()}
                     red, nir = got.get("red"), got.get("nir")
                     if red is None or nir is None:
                         continue
-                    green, swir, scl = got.get("green"), got.get("swir16"), got.get("scl")
+                    green, swir, qa = got.get("green"), got.get("swir16"), got.get("qa")
 
                     ndvi = normalised(nir, red)
                     ndwi = normalised(green, nir) if green is not None else np.zeros_like(ndvi)
                     ndmi = normalised(nir, swir) if swir is not None else np.zeros_like(ndvi)
 
-                    if scl is not None:
-                        invalid = np.isin(scl.astype("int16"), SCL_INVALID)
+                    if qa is not None:
+                        invalid = _cloud_invalid_mask(qa, collection)
                         ndvi = np.where(invalid, np.nan, ndvi)
 
                     if np.isfinite(ndvi).mean() < 0.5:
@@ -195,30 +326,54 @@ async def main() -> int:
                             "aoi": name,
                             "year": year,
                             "window": start_md,
+                            "collection": collection,
                             "ndvi": ndvi.astype("float32"),
                             "ndmi": np.nan_to_num(ndmi, nan=0.0).astype("float32"),
                             "ndwi": np.nan_to_num(ndwi, nan=0.0).astype("float32"),
                         }
                     )
                     per_aoi += 1
-            print(f"  {name:11} {per_aoi:2} scenes", flush=True)
+                    per_aoi_landsat += collection == "landsat-c2-l2"
+            flag = f"  ({per_aoi_landsat} via Landsat fallback)" if per_aoi_landsat else ""
+            print(f"  {name:11} {per_aoi:2} scenes{flag}", flush=True)
 
     print(f"\n  collected {len(samples)} scenes across {len({s['aoi'] for s in samples})} AOIs")
 
     # ---- the label: per (AOI, seasonal window) anomaly -------------------------
     #
-    # Baseline = median NDVI for that AOI in that calendar window across all years. A pixel is
-    # stressed when it sits more than `MARGIN` below its own location-and-season norm.
+    # Baseline = median NDVI for that AOI in that calendar window, from DE Africa's independent
+    # multi-year `ndvi_anomaly` archive where it is reachable, falling back to the median of this
+    # run's own live-fetched scenes only where DE Africa has no coverage for that tile.
     #
     # Computed per (aoi, window) rather than globally — that is the whole point. A global cut would
     # be the fixed threshold the model is supposed to improve on.
     MARGIN = 0.10
     baselines: dict[tuple[str, str], float] = {}
-    for key in {(s["aoi"], s["window"]) for s in samples}:
-        group = [s for s in samples if (s["aoi"], s["window"]) == key]
-        pooled = np.concatenate([s["ndvi"][np.isfinite(s["ndvi"])] for s in group])
-        if pooled.size:
-            baselines[key] = float(np.median(pooled))
+    baseline_sources: dict[tuple[str, str], str] = {}
+    aoi_bbox = dict(AOIS)
+    async with httpx.AsyncClient(timeout=60) as de_africa_client:
+        for key in {(s["aoi"], s["window"]) for s in samples}:
+            aoi_name, window_key = key
+            months = WINDOW_MONTHS.get(window_key, ())
+            de_africa_value = await _de_africa_baseline(
+                de_africa_client, aoi_bbox[aoi_name], months
+            )
+            if de_africa_value is not None:
+                baselines[key] = de_africa_value
+                baseline_sources[key] = "de-africa-climatology"
+                continue
+
+            group = [s for s in samples if (s["aoi"], s["window"]) == key]
+            pooled = np.concatenate([s["ndvi"][np.isfinite(s["ndvi"])] for s in group])
+            if pooled.size:
+                baselines[key] = float(np.median(pooled))
+                baseline_sources[key] = "live-scene-median"
+
+    de_africa_count = sum(1 for v in baseline_sources.values() if v == "de-africa-climatology")
+    print(
+        f"  baselines: {de_africa_count}/{len(baselines)} from DE Africa climatology, "
+        f"{len(baselines) - de_africa_count} from live-scene fallback"
+    )
 
     x_list, y_list, v_list, meta = [], [], [], []
     for s in samples:
@@ -228,7 +383,13 @@ async def main() -> int:
         ndvi = s["ndvi"]
         valid = np.isfinite(ndvi)
         label = (ndvi < (base - MARGIN)).astype("float32")
-        x_list.append(np.stack([np.nan_to_num(ndvi, nan=0.0), s["ndmi"], s["ndwi"]]))
+        # Fourth channel: ndvi - baseline. Zero where invalid, matching the neutral value
+        # `predict_crop_stress`/`crop_stress_attribution` use when no seasonal baseline exists —
+        # the honest "typical for this field" default, not a missing-data sentinel.
+        anomaly = np.where(valid, ndvi - base, 0.0).astype("float32")
+        x_list.append(
+            np.stack([np.nan_to_num(ndvi, nan=0.0), s["ndmi"], s["ndwi"], anomaly])
+        )
         y_list.append(label[None, ...])
         v_list.append(valid.astype("float32")[None, ...])
         meta.append({"aoi": s["aoi"], "year": s["year"], "window": s["window"], "baseline": base})

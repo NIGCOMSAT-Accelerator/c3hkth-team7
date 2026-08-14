@@ -4324,6 +4324,17 @@
             "title": "Available",
             "type": "boolean"
           },
+          "field_capacity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Capacity"
+          },
           "location_error_deg": {
             "default": 0.0,
             "title": "Location Error Deg",
@@ -4334,12 +4345,45 @@
             "title": "Observed Date",
             "type": "string"
           },
+          "saturation_point": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saturation Point"
+          },
+          "texture_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Texture Class"
+          },
           "volumetric": {
             "default": 0.0,
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Volumetric",
             "type": "number"
+          },
+          "wilting_point": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wilting Point"
           }
         },
         "title": "SoilMoisture",
@@ -4352,6 +4396,17 @@
             "default": false,
             "title": "Available",
             "type": "boolean"
+          },
+          "field_capacity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Capacity"
           },
           "irrigation_advice": {
             "anyOf": [
@@ -4376,11 +4431,33 @@
             "title": "Observed Date",
             "type": "string"
           },
+          "saturation_point": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saturation Point"
+          },
           "status": {
-            "description": "Agronomic band: `unknown` | `very_dry` | `dry` | `adequate` | `wet` | `saturated`.\n\nBands rather than a raw figure because \"0.19 m3/m3\" is not actionable to a farmer and the\nband is what changes the advice. Thresholds are the wide loam bands in `soil_moisture.py` \u2014\ndeliberately coarse, since a per-texture curve needs parameters SoilGrids does not serve.",
+            "description": "Agronomic band: `unknown` | `very_dry` | `dry` | `adequate` | `wet` | `saturated`.\n\nBands rather than a raw figure because \"0.19 m3/m3\" is not actionable to a farmer and the\nband is what changes the advice. Uses this plot's iSDAsoil-derived texture band when\n`wilting_point`/`field_capacity`/`saturation_point` are set (see `eo/soil_texture.py`),\nfalling back to the wide loam default in `soil_moisture.py` when they are not \u2014 the same\n\"absent is not zero\" degrade every other optional reading in this codebase follows.",
             "readOnly": true,
             "title": "Status",
             "type": "string"
+          },
+          "texture_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Texture Class"
           },
           "volumetric": {
             "default": 0.0,
@@ -4388,6 +4465,17 @@
             "minimum": 0.0,
             "title": "Volumetric",
             "type": "number"
+          },
+          "wilting_point": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wilting Point"
           }
         },
         "required": [

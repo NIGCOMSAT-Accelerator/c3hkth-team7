@@ -181,6 +181,7 @@ export const SOURCE_LABEL: Record<string, string> = {
   "copernicus-dem": "Copernicus DEM",
   openstreetmap: "OpenStreetMap",
   soilgrids: "SoilGrids",
+  "isda-soil-texture": "iSDAsoil texture class",
   "smap-l3": "NASA SMAP soil moisture",
   "malaria-atlas": "Malaria Atlas",
 };

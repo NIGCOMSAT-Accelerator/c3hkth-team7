@@ -289,7 +289,7 @@ def test_static_products_are_not_repolled_every_cycle():
     """
     from app.eo import sources
 
-    for key in ("copernicus-dem", "soilgrids", "worldcover", "malaria-atlas"):
+    for key in ("copernicus-dem", "soilgrids", "isda-soil-texture", "worldcover", "malaria-atlas"):
         source = sources.BY_KEY[key]
         assert source.min_interval_hours >= 168, (
             f"{key} is effectively static but declares a "
@@ -318,7 +318,7 @@ def test_registry_covers_every_documented_data_source():
         "element84", "copernicus", "planetary", "landsat",
         "gfs-forecast", "gpm-imerg", "climateserv-chirps", "era5",
         "worldpop", "worldcover", "copernicus-dem", "jrc-gsw", "openstreetmap",
-        "soilgrids", "smap-l3", "malaria-atlas",
+        "soilgrids", "isda-soil-texture", "smap-l3", "malaria-atlas",
     }
     assert set(sources.BY_KEY) == expected
 

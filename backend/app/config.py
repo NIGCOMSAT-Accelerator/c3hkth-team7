@@ -344,6 +344,13 @@ class Settings(BaseSettings):
     # Clay above this (g/kg) drains slowly, so waterlogging persists and the
     # crop-damage window is longer.
     soilgrids_heavy_clay_threshold: float = 350.0
+    # USDA texture class at 0-20cm, 30m, Africa-only. A single continent-wide unsigned COG on the
+    # AWS Open Data registry (s3://isdasoil) — no signing, no account, verified reachable 2026-08-14.
+    # Used to pick the right wilting-point/field-capacity/saturation band for THIS plot's soil
+    # instead of the wide "loam" default in `soil_moisture.py` — see `eo/soil_texture.py`.
+    isda_texture_class_url: str = (
+        "https://isdasoil.s3.amazonaws.com/soil_data/texture_class/texture_class.tif"
+    )
 
     # ---------------- Health reference ----------------
     # An operator switch for the one source whose upstream is currently down. Every EO adapter

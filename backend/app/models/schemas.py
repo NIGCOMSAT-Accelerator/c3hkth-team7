@@ -626,6 +626,18 @@ class SoilMoisture(BaseModel):
     location_error_deg: float = 0.0
     available: bool = False
 
+    # ## Per-plot thresholds, from iSDAsoil texture classification — see `eo/soil_texture.py`
+    #
+    # None means "no texture reading for this plot" — `status` below falls back to the wide loam
+    # default in `soil_moisture.py`, exactly as it did before these fields existed. Never a computed
+    # default here: this model must not invent a texture class it was not given.
+    wilting_point: float | None = None
+    field_capacity: float | None = None
+    saturation_point: float | None = None
+    #: Reader-facing label, e.g. "Sandy Clay Loam" — provenance for why the bands above differ
+    #: from the loam default, not used in the classification itself.
+    texture_class: str | None = None
+
     # ## Both derived fields are SERIALISED, not left as bare properties
     #
     # `@computed_field` puts them on the wire. Without it a client sees only `volumetric` and has
@@ -642,20 +654,28 @@ class SoilMoisture(BaseModel):
         """Agronomic band: `unknown` | `very_dry` | `dry` | `adequate` | `wet` | `saturated`.
 
         Bands rather than a raw figure because "0.19 m3/m3" is not actionable to a farmer and the
-        band is what changes the advice. Thresholds are the wide loam bands in `soil_moisture.py` —
-        deliberately coarse, since a per-texture curve needs parameters SoilGrids does not serve.
+        band is what changes the advice. Uses this plot's iSDAsoil-derived texture band when
+        `wilting_point`/`field_capacity`/`saturation_point` are set (see `eo/soil_texture.py`),
+        falling back to the wide loam default in `soil_moisture.py` when they are not — the same
+        "absent is not zero" degrade every other optional reading in this codebase follows.
         """
         if not self.available:
             return "unknown"
         from app.eo.soil_moisture import FIELD_CAPACITY, SATURATION, WILTING_POINT
 
-        if self.volumetric < WILTING_POINT:
+        wilting_point = self.wilting_point if self.wilting_point is not None else WILTING_POINT
+        field_capacity = (
+            self.field_capacity if self.field_capacity is not None else FIELD_CAPACITY
+        )
+        saturation = self.saturation_point if self.saturation_point is not None else SATURATION
+
+        if self.volumetric < wilting_point:
             return "very_dry"
-        if self.volumetric < WILTING_POINT + (FIELD_CAPACITY - WILTING_POINT) * 0.5:
+        if self.volumetric < wilting_point + (field_capacity - wilting_point) * 0.5:
             return "dry"
-        if self.volumetric <= FIELD_CAPACITY:
+        if self.volumetric <= field_capacity:
             return "adequate"
-        if self.volumetric < SATURATION:
+        if self.volumetric < saturation:
             return "wet"
         return "saturated"
 

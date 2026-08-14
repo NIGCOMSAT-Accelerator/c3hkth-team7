@@ -381,6 +381,23 @@ SOURCES: tuple[Source, ...] = (
         env_section="SOIL",
     ),
     Source(
+        key="isda-soil-texture",
+        label="iSDAsoil USDA texture class (water-retention band)",
+        kind=Kind.REFERENCE,
+        poll=Poll.STAC_COG,
+        settings_keys=("isda_texture_class_url",),
+        credential_key=None,
+        # Soil texture is a physical constant at this timescale — same reasoning as soilgrids.
+        min_interval_hours=8760,
+        cacheable=True,
+        env_section="SOIL",
+        notes=(
+            "Unsigned single-file COG on the AWS Open Data registry (s3://isdasoil), no signing, "
+            "no account. Picks the wilting-point/field-capacity/saturation band SoilMoisture.status "
+            "classifies against, replacing the wide loam default for plots where this reads."
+        ),
+    ),
+    Source(
         key="malaria-atlas",
         label="Malaria Atlas Project (PfPR baseline)",
         kind=Kind.REFERENCE,

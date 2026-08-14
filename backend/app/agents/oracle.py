@@ -30,6 +30,7 @@ from app.eo import health as health_mod
 from app.eo import rainfall as rainfall_mod
 from app.eo import soil as soil_mod
 from app.eo import soil_moisture as soil_moisture_mod
+from app.eo import soil_texture as soil_texture_mod
 from app.eo import terrain as terrain_mod
 from app.eo.rainfall import PONDING_RAINFALL_MM
 from app.logging_config import get_logger
@@ -96,7 +97,7 @@ class OracleAgent(Agent[tuple[AreaOfInterest, AnalystResult], RiskAssessment]):
     ) -> RiskAssessment:
         aoi, analysis = payload
 
-        # Six independent network calls; none may block the others. Terrain joins
+        # Seven independent network calls; none may block the others. Terrain joins
         # the gather rather than running before it because it is cached per AOI with
         # a 30-day TTL — on all but the first cycle it returns without I/O, so
         # placing it here costs nothing and keeps the critical path one round trip.
@@ -107,6 +108,7 @@ class OracleAgent(Agent[tuple[AreaOfInterest, AnalystResult], RiskAssessment]):
             wetness,
             health,
             terrain_profile,
+            texture,
         ) = await asyncio.gather(
             rainfall_mod.rainfall_outlook(aoi.bbox),
             exposure_mod.exposure_for(aoi.bbox),
@@ -114,6 +116,7 @@ class OracleAgent(Agent[tuple[AreaOfInterest, AnalystResult], RiskAssessment]):
             soil_moisture_mod.soil_moisture(aoi.bbox),
             health_mod.malaria_baseline(aoi.bbox),
             self._terrain(aoi.bbox),
+            soil_texture_mod.texture_thresholds(aoi.bbox),
             return_exceptions=True,
         )
 
@@ -129,6 +132,23 @@ class OracleAgent(Agent[tuple[AreaOfInterest, AnalystResult], RiskAssessment]):
             if isinstance(terrain_profile, terrain_mod.TerrainProfile)
             else terrain_mod.TerrainProfile()
         )
+        texture = (
+            texture
+            if isinstance(texture, soil_texture_mod.TextureThresholds)
+            else soil_texture_mod.TextureThresholds()
+        )
+        # Merge the texture-derived band onto `wetness` when available; `SoilMoisture.status`
+        # falls back to the wide loam default itself when these stay None, so an unavailable
+        # texture read degrades exactly like every other optional signal here.
+        if texture.available:
+            wetness = wetness.model_copy(
+                update={
+                    "wilting_point": texture.wilting_point,
+                    "field_capacity": texture.field_capacity,
+                    "saturation_point": texture.saturation_point,
+                    "texture_class": texture.texture_class,
+                }
+            )
 
         hazard = self._classify(analysis, outlook, exposure, terrain_profile)
         observed_term = self._observed_term(hazard, analysis, soil)
