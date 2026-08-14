@@ -375,3 +375,359 @@ def test_a_result_with_no_ring_carries_no_verdict():
     result = route._to_result(place)
     assert result.ring is None
     assert result.monitoring is None
+
+
+# --------------------------------------------------------------------------- #
+# Admin-hierarchy fallback — a real state/LGA named among words no gazetteer carries
+# --------------------------------------------------------------------------- #
+
+#: The exact address a pilot tester reported: Nominatim matches nothing, in full or with any
+#: leading words dropped, because "Kobape" appears twice and poisons every attempt containing
+#: it — interleaved with the real LGA name rather than cleanly comma-separated from it.
+_PILOT_ADDRESS = (
+    "Akolu Family Land Mosunmore Village, Kobape Obafemi Owode Local Government, "
+    "Kobape 110113, Ogun State"
+)
+
+
+def test_squash_ignores_case_and_punctuation():
+    assert places._squash("Ogun State") == "ogunstate"
+    assert places._squash("Ado-Odo/Ota") == places._squash("Ado Odo Ota")
+
+
+async def test_admin_fallback_finds_state_and_lga_despite_unmapped_words(monkeypatch):
+    async def fake_states():
+        return ["Ogun State", "Lagos State", "Kano State"]
+
+    async def fake_lgas(state):
+        assert state == "Ogun State"
+        return ["Abeokuta North", "Obafemi Owode", "Ado-Odo/Ota"]
+
+    monkeypatch.setattr(places.admin, "list_states", fake_states)
+    monkeypatch.setattr(places.admin, "list_lgas", fake_lgas)
+
+    assert await places._admin_fallback(_PILOT_ADDRESS, "ng") == ("Ogun State", "Obafemi Owode")
+
+
+async def test_admin_fallback_prefers_the_longer_lga_match(monkeypatch):
+    """'Ado Odo' and 'Ado-Odo/Ota' can both appear in one state's LGA list — the shorter one
+    matching first would silently pick the wrong LGA's extent for an address naming the longer."""
+
+    async def fake_states():
+        return ["Ogun State"]
+
+    async def fake_lgas(state):
+        return ["Ado Odo", "Ado-Odo/Ota"]
+
+    monkeypatch.setattr(places.admin, "list_states", fake_states)
+    monkeypatch.setattr(places.admin, "list_lgas", fake_lgas)
+
+    matched = await places._admin_fallback("somewhere in Ado-Odo/Ota, Ogun State", "ng")
+    assert matched == ("Ogun State", "Ado-Odo/Ota")
+
+
+async def test_admin_fallback_declines_outside_nigeria(monkeypatch):
+    """A global deployment must not spend two ArcGIS round trips on a query this cannot help."""
+    called = False
+
+    async def fake_states():
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(places.admin, "list_states", fake_states)
+    assert await places._admin_fallback("anything at all", "gh") is None
+    assert not called
+
+
+async def test_admin_fallback_returns_none_when_nothing_matches(monkeypatch):
+    async def fake_states():
+        return ["Ogun State"]
+
+    monkeypatch.setattr(places.admin, "list_states", fake_states)
+    assert await places._admin_fallback("a query about nowhere in particular", "ng") is None
+
+
+# --------------------------------------------------------------------------- #
+# Clause fallback — a real place split across several commas, where trying every
+# clause and pooling the results would be actively wrong
+# --------------------------------------------------------------------------- #
+
+#: A second real pilot report. Every leading-word-dropped attempt matches nothing until "Lekki
+#: Lagos" — which DOES match, to Ibeju Lekki, a real Lagos LGA measured 32.7 km from the actual
+#: address. "Agungi, Lagos" alone, a different clause, correctly matches a road a few hundred
+#: metres away. Pooling every clause's results (an earlier version of this fix) let the wrong
+#: match through just as easily as the right one, because both are non-administrative kinds.
+_LEKKI_ADDRESS = "Victory Mews, 47 Ajiran-Agungi Road, Agungi, Lekki, Lagos"
+
+
+async def test_clause_fallback_prefers_the_specific_place_over_the_ambiguous_one(monkeypatch):
+    """The exact trap: a short, generic clause ("Lekki") resolves to a real but wrong LGA, while
+    a longer, more specific one ("47 Ajiran-Agungi Road") resolves to the correct road. Trying
+    longest-first and stopping at the first specific hit must return only the correct one."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        q = str(request.url.params.get("q"))
+        if "Ajiran-Agungi" in q:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "lat": "6.4507219",
+                        "lon": "3.5192845",
+                        "display_name": "Agungi Ajiran Road, Eti Osa, Lagos State, Nigeria",
+                        "type": "tertiary",
+                        "address": {"country_code": "ng", "state": "Lagos State"},
+                    }
+                ],
+            )
+        # Every other clause — including "Lekki" — must never even be reached, because the
+        # longer, more specific clause above answers first and the search stops there.
+        raise AssertionError(f"a less specific clause was tried: {q!r}")
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(places.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(places.settings, "nominatim_min_interval_seconds", 0.0)
+
+    found = await places._clause_fallback(_LEKKI_ADDRESS, "ng", limit=5)
+
+    assert len(found) == 1
+    assert found[0].kind == "tertiary"
+    assert found[0].matched_query == "47 Ajiran-Agungi Road, Lagos, Nigeria"
+
+
+async def test_clause_fallback_falls_through_administrative_hits_to_a_later_clause(monkeypatch):
+    """When the longest clause matches only an administrative kind, the search must keep trying
+    shorter clauses rather than settling for the region — the whole point being to prefer a
+    specific place when a later clause offers one."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        q = str(request.url.params.get("q"))
+        if q.startswith("Lekki,"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "lat": "6.4711251",
+                        "lon": "3.8147504",
+                        "display_name": "Ibeju Lekki, Lagos State, Nigeria",
+                        "type": "administrative",
+                        "address": {"country_code": "ng", "state": "Lagos State"},
+                    }
+                ],
+            )
+        if q.startswith("Agungi,"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "lat": "6.4507219",
+                        "lon": "3.5192845",
+                        "display_name": "Agungi Ajiran Road, Eti Osa, Lagos State, Nigeria",
+                        "type": "tertiary",
+                        "address": {"country_code": "ng", "state": "Lagos State"},
+                    }
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(places.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(places.settings, "nominatim_min_interval_seconds", 0.0)
+
+    # Only "Agungi" and "Lekki" as candidates — both the same length, so ordering between them is
+    # not the thing under test; what matters is that the administrative "Lekki" hit alone never
+    # becomes the answer while "Agungi" offers a specific one.
+    found = await places._clause_fallback("Agungi, Lekki, Lagos", "ng", limit=5)
+
+    assert len(found) == 1
+    assert found[0].kind == "tertiary"
+    assert found[0].label.startswith("Agungi")
+
+
+async def test_clause_fallback_returns_administrative_only_as_a_last_resort(monkeypatch):
+    """No clause offers anything specific — the administrative hit is still better than nothing,
+    and the caller (`_admin_fallback` next) is the one deciding whether to trust it further."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "lat": "6.4711251",
+                    "lon": "3.8147504",
+                    "display_name": "Ibeju Lekki, Lagos State, Nigeria",
+                    "type": "administrative",
+                    "address": {"country_code": "ng", "state": "Lagos State"},
+                }
+            ],
+        )
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(places.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(places.settings, "nominatim_min_interval_seconds", 0.0)
+
+    found = await places._clause_fallback("Somewhere, Lekki, Lagos", "ng", limit=5)
+
+    assert found and all(p.kind == "administrative" for p in found)
+    assert all(p.approximate for p in found)
+
+
+async def test_clause_fallback_returns_every_same_named_candidate_ranked(monkeypatch):
+    """A third real pilot report: 'AGBARA' alone matches both a well-known industrial estate
+    and an unrelated village 89 km away, sharing one name. Unlike the cross-clause Lekki case,
+    both candidates come from the IDENTICAL query — there is no better clause to prefer instead,
+    so both must be returned for the subscriber to choose from, ranked by Nominatim's own
+    `importance` score rather than collapsed to a single guess."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                # Deliberately returned in the WRONG order, to prove sorting is by `importance`
+                # and not by whatever order the mock (or a real upstream) happens to respond in.
+                {
+                    "lat": "7.2500000",
+                    "lon": "3.4000000",
+                    "display_name": "Agbara, Odeda, Ogun, Nigeria",
+                    "type": "village",
+                    "importance": 0.14672082932784003,
+                    "address": {"country_code": "ng", "state": "Ogun State"},
+                },
+                {
+                    "lat": "6.5046932",
+                    "lon": "3.1004891",
+                    "display_name": "Agbara, Ado Odo/Ota, Ogun, Nigeria",
+                    "type": "town",
+                    "importance": 0.16004000076295108,
+                    "address": {"country_code": "ng", "state": "Ogun State"},
+                },
+            ],
+        )
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(places.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(places.settings, "nominatim_min_interval_seconds", 0.0)
+
+    found = await places._clause_fallback("10/12, AGBARA", "ng", limit=5)
+
+    assert len(found) == 2
+    assert all(p.approximate for p in found)
+    # Higher importance (the real industrial estate) first, regardless of upstream order.
+    assert found[0].label == "Agbara, Ado Odo/Ota, Ogun, Nigeria"
+    assert found[1].label == "Agbara, Odeda, Ogun, Nigeria"
+
+
+async def test_clause_fallback_declines_outside_nigeria():
+    assert await places._clause_fallback(_LEKKI_ADDRESS, "gh", limit=5) == []
+
+
+async def test_clause_fallback_needs_at_least_two_clauses():
+    """A single-clause query has no trailing context to pair a candidate against — nothing here
+    for this tier to try that the original query did not already."""
+    assert await places._clause_fallback("Agungi", "ng", limit=5) == []
+
+
+async def test_search_falls_back_to_the_nearest_recognised_area(monkeypatch):
+    """End to end: the reported address resolves to an honestly-flagged approximate result
+    instead of an empty list, after BOTH fallback tiers run — `_clause_fallback` first, matching
+    nothing here (every one of this address's clauses genuinely returns empty on real Nominatim,
+    "Kobape" poisoning each), then `_admin_fallback`'s clean retry succeeding.
+
+    Matched by the EXACT query text, not call order — `_clause_fallback` now runs before
+    `_admin_fallback` and makes its own several attempts first, so a call-count-based mock would
+    silently assert the wrong thing about which tier answered.
+    """
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        q = str(request.url.params.get("q"))
+        if q == "Obafemi Owode, Ogun State, Nigeria":
+            # `_admin_fallback`'s clean retry, built from GRID3's own spelling — this is the one
+            # attempt that must succeed.
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "lat": "6.9171662",
+                        "lon": "3.4459066",
+                        "display_name": "Obafemi Owode, Ogun State, Nigeria",
+                        "type": "administrative",
+                        "address": {"country_code": "ng", "state": "Ogun State"},
+                    }
+                ],
+            )
+        # Every other attempt — the raw polluted query and every `_clause_fallback` candidate —
+        # genuinely returns empty on real Nominatim; see `_PILOT_ADDRESS`'s own docstring.
+        return httpx.Response(200, json=[])
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    async def fake_states():
+        return ["Ogun State"]
+
+    async def fake_lgas(state):
+        return ["Obafemi Owode"]
+
+    monkeypatch.setattr(places.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(places.settings, "nominatim_min_interval_seconds", 0.0)
+    monkeypatch.setattr(places.admin, "list_states", fake_states)
+    monkeypatch.setattr(places.admin, "list_lgas", fake_lgas)
+
+    found = await places.search(_PILOT_ADDRESS, limit=5, country="ng")
+
+    assert len(found) == 1
+    assert found[0].approximate is True
+    assert found[0].matched_query == "Obafemi Owode, Ogun State, Nigeria"
+    assert found[0].admin1 == "Ogun State"
+
+
+async def test_search_does_not_fall_back_when_nominatim_already_found_something(monkeypatch):
+    """The common case must not pay for a fallback it does not need."""
+    fallback_called = False
+
+    async def fake_admin_fallback(query, country):
+        nonlocal fallback_called
+        fallback_called = True
+        return None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[MOSQUE])
+
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(places.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(places.settings, "nominatim_min_interval_seconds", 0.0)
+    monkeypatch.setattr(places, "_admin_fallback", fake_admin_fallback)
+
+    found = await places.search("Kano Central Mosque", limit=1)
+
+    assert found and found[0].approximate is False
+    assert not fallback_called

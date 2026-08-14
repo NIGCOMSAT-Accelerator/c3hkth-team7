@@ -32,11 +32,12 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import httpx
 
 from app.config import settings
+from app.eo import admin
 from app.logging_config import get_logger
 from app.store import cache
 
@@ -113,6 +114,15 @@ class Place:
     #: Kano Central Mosque is **0.147 ha**, about 14 Sentinel pixels, against a
     #: `MIN_AOI_HECTARES` floor of 0.5. See `human.monitoring_note`.
     ring_hectares: float | None = None
+    #: True when this result did NOT come from the caller's own query text matching a place, but
+    #: from `_admin_fallback` recognising a real Nigerian state/LGA named somewhere inside a
+    #: query that otherwise matched nothing — see `search`. The caller must say so: this is the
+    #: nearest recognised administrative area, not a confirmed match for the address as typed.
+    approximate: bool = False
+    #: The query actually resolved, when it differs from what the caller sent — e.g.
+    #: "Obafemi Owode, Ogun, Nigeria" for an input the geocoder never matched as typed. None when
+    #: the original query resolved directly. Lets a reader check what was actually searched.
+    matched_query: str | None = None
 
 
 def _pick_admin(address: dict) -> tuple[str | None, str | None]:
@@ -358,6 +368,243 @@ async def _get(path: str, params: dict) -> list[dict] | dict | None:
     return payload
 
 
+def _squash(text: str) -> str:
+    """Lowercase, letters-and-digits only — for substring matching a name against a whole blob.
+
+    Not `admin._canonical`: that strips a trailing administrative suffix from a short CANDIDATE
+    name ("Ogun State" -> "ogun"), which is a different job from squashing an entire address for
+    substring search. Reused where the job is actually the same (comparing two candidate names);
+    written fresh here because it is not.
+    """
+    return "".join(character for character in (text or "").lower() if character.isalnum())
+
+
+#: Nominatim kinds that describe a REGION rather than a specific place. Kept away from when a
+#: more specific kind also matched a different clause of the same query — see
+#: `_clause_fallback` for why that distinction is load-bearing rather than cosmetic.
+_ADMIN_KINDS = frozenset({"administrative", "state", "country", "region"})
+
+#: Bound on how many of a query's comma clauses `_clause_fallback` will try individually. Each
+#: attempt is a full Nominatim round trip under the same 1 req/sec policy as everything else in
+#: this module, so an unbounded address (or a pasted paragraph) must not turn one "resolve" click
+#: into a multi-second stall. Tried nearest-to-the-anchor first — see the function docstring for
+#: why that ordering, not the leading clauses, is where a real address's reliable names cluster.
+_CLAUSE_FALLBACK_LIMIT = 4
+
+
+async def _clause_fallback(query: str, country: str | None, limit: int) -> list[Place]:
+    """Try each comma-separated clause individually against the trailing context, or `[]`.
+
+    ## The failure `_admin_fallback` cannot handle
+
+    Measured on a real pilot report:
+
+        "Victory Mews, 47 Ajiran-Agungi Road, Agungi, Lekki, Lagos"
+
+    Dropping words from the front one at a time matches nothing until "Lekki Lagos" — which DOES
+    match, to **Ibeju Lekki**, a real Lagos LGA **32.7 km** from the actual address. OSM conflates
+    the informal, popular "Lekki" (near Victoria Island, part of Eti Osa LGA) with that distant
+    administrative one, and a fallback that returns the first non-empty hit would silently place
+    an AOI two LGAs away with nothing marking it wrong — a worse failure than the empty result it
+    replaces, because it LOOKS confident. "Agungi, Lagos" alone, a different clause entirely,
+    correctly matches a road a few hundred metres from the address.
+
+    So this tries every clause independently rather than suffixes of the whole string — but NOT
+    pooled together. A first version collected every clause's results and just preferred
+    non-administrative ones, and "Lekki, Lagos, Nigeria" alone returned FOUR non-administrative
+    hits (a shopping mall, a conservation centre, a lagoon, a seaport — none within several
+    kilometres of "Agungi"), which passed the admin-kind filter just as easily as the correct
+    road did. A wrong "specific" place is exactly as silently misleading as a wrong administrative
+    one; kind alone does not prove relevance.
+
+    So clauses are tried **longest first** — a more specific string is less likely to collide with
+    something unrelated than a short, generic one like "Lekki" — and the search STOPS at the
+    first clause that yields any non-administrative result. Shorter, more ambiguous clauses are
+    never even tried once a specific one has already answered.
+
+    ## Same-named places, and why this returns every candidate from the winning clause
+
+    A single clause can itself match more than one real place — measured on a second real report,
+    "AGBARA" alone matches both the well-known Agbara industrial estate (`Ado Odo/Ota` LGA) and an
+    unrelated same-named village 89 km away in `Odeda` LGA. This is a different situation from the
+    cross-clause case above: that one is a symptom of asking the wrong question (a vaguer clause
+    happened to match something irrelevant), and the fix is to never ask it once a better clause
+    has answered. This one is a genuine ambiguity IN THE DATA — two real places, one name — and no
+    amount of picking a better clause resolves it, because both candidates came from the identical
+    query. Nominatim's `importance` score orders them (0.160 against 0.147 here, a real published
+    field), but a subscriber who knows their own address is a more reliable tie-breaker than a
+    heuristic score, so every candidate from the winning clause is returned, ranked, rather than
+    collapsed to the top one — the same reasoning `explain/irrigation.py` uses to say "we cannot
+    tell you" rather than guess when the evidence does not support a single answer. Each result
+    still carries `approximate=True`. The administrative last-resort tier is ranked and returned
+    the same way, before the caller falls through to `_admin_fallback` — GRID3's authoritative
+    hierarchy, not one Nominatim guess, is the safer source when NO clause yields anything
+    non-administrative at all.
+
+    Nigeria-only, same reasoning as `_admin_fallback`: elsewhere this cannot help and would only
+    spend extra round trips on a query it has no way to resolve.
+    """
+    if country and country.strip().lower() != "ng":
+        return []
+
+    clauses = [c.strip() for c in query.split(",") if c.strip()]
+    if len(clauses) < 2:
+        return []
+
+    anchor = clauses[-1]
+    # Longest first, within the cost bound — see `_CLAUSE_FALLBACK_LIMIT`.
+    candidates = sorted(clauses[:-1], key=len, reverse=True)[:_CLAUSE_FALLBACK_LIMIT]
+    if not candidates:
+        return []
+
+    administrative: list[tuple[str, Place, float]] = []
+
+    for clause in candidates:
+        attempt = f"{clause}, {anchor}, Nigeria"
+        payload = await _get("search", {"q": attempt, "limit": max(1, min(limit, 20))})
+        if not isinstance(payload, list):
+            continue
+
+        specific: list[tuple[str, Place, float]] = []
+        for item in payload:
+            place = _to_place(item)
+            if place is None:
+                continue
+            # Nominatim's own relevance score. Explicit rather than trusted-by-API-order: measured
+            # on the real "Agbara" collision this exists for, the correct match (a well-known
+            # industrial estate, `Ado Odo/Ota` LGA) scored 0.160 against 0.147 for a same-named
+            # village 89 km away in a different LGA — a real, published signal, not a coincidence
+            # of response ordering that happened to agree with it this once.
+            importance = float(item.get("importance") or 0.0)
+            bucket = administrative if (place.kind or "") in _ADMIN_KINDS else specific
+            bucket.append((attempt, place, importance))
+
+        if specific:
+            # Every candidate from THIS clause, best-ranked first — not collapsed to one.
+            #
+            # This is deliberately different from the choice between CLAUSES above: once one
+            # clause has answered, a less specific clause is never even tried, because trying it
+            # is what surfaced a wrong 32.7 km answer for "Lekki". But two real, differently
+            # located places sharing one name — "Agbara" matching both a well-known industrial
+            # estate and an unrelated village 89 km away — is a genuine ambiguity in the data
+            # itself, not a symptom of asking the wrong question. Nominatim's `importance` score
+            # is a real signal (0.160 against 0.147 here) and orders the list, but a subscriber
+            # who knows their own address is the more reliable tie-breaker than a heuristic —
+            # the same reasoning `explain/irrigation.py` uses to say "we cannot tell you" rather
+            # than guess. Every result still carries `approximate=True`.
+            specific.sort(key=lambda row: row[2], reverse=True)
+            return [
+                replace(place, approximate=True, matched_query=attempt)
+                for attempt, place, _ in specific
+            ]
+
+    if not administrative:
+        return []
+    administrative.sort(key=lambda row: row[2], reverse=True)
+    return [
+        replace(place, approximate=True, matched_query=attempt)
+        for attempt, place, _ in administrative
+    ]
+
+
+async def _admin_fallback(query: str, country: str | None) -> tuple[str, str] | None:
+    """`(state, lga)` named somewhere inside `query`, via GRID3's own admin hierarchy — or None.
+
+    ## Why a real address can name a real place and still match nothing above
+
+    Nominatim's search treats every word in a long query as significant, so ONE token it has
+    never indexed — a family-land name, an unmapped hamlet, a hyper-local descriptor no gazetteer
+    was ever going to carry — can fail a match that would otherwise succeed, even when the address
+    plainly names a real LGA and state a few words later. Measured on a real pilot report:
+
+        "Akolu Family Land Mosunmore Village, Kobape Obafemi Owode Local Government,
+         Kobape 110113, Ogun State"
+
+    returns zero results from Nominatim, in full or with any LEADING words dropped — "Kobape"
+    alone poisons every attempt containing it, and it appears twice, interleaved with the LGA
+    name rather than cleanly separated by a comma a simple prefix-drop could skip past. But the
+    address does contain a real state ("Ogun") and a real LGA ("Obafemi Owode"), both squarely in
+    GRID3's own list. This is not a trick Google or Waze have that this deployment lacks; it is
+    the same fallback any address parser needs, because their index does not have "Akolu Family
+    Land" either — recognising the administrative names actually present, rather than guessing
+    which words to discard.
+
+    Nigeria-only for now, and `country` gates it: a global deployment should not spend two ArcGIS
+    round trips per failed search on an address this fallback cannot help regardless.
+    """
+    if country and country.strip().lower() != "ng":
+        return None
+
+    blob = _squash(query)
+    if not blob:
+        return None
+
+    states = await admin.list_states()
+    matched_state = next((s for s in states if _squash(s) and _squash(s) in blob), None)
+    if matched_state is None:
+        return None
+
+    lgas = await admin.list_lgas(matched_state)
+    # Longest match first: "Ado Odo" and "Ado Odo/Ota" can both appear in `lgas`, and the
+    # shorter one matching first would silently pick the wrong LGA's extent.
+    matched_lga = next(
+        (
+            name
+            for name in sorted(lgas, key=len, reverse=True)
+            if _squash(name) and _squash(name) in blob
+        ),
+        None,
+    )
+    if matched_lga is None:
+        return None
+
+    return matched_state, matched_lga
+
+
+async def _resolve_admin_fallback(query: str, limit: int) -> list[Place]:
+    """The actual approximate result(s) for a recognised `(state, lga)` pair.
+
+    Retries Nominatim first, on a clean "{lga}, {state}, Nigeria" string built from GRID3's own
+    correctly-spelled names — measured to succeed where the original polluted query did not, and
+    when it does, the result carries a real OSM point or polygon rather than a bounding-box
+    centroid. `admin.lga_extent` is the fallback for the rarer case where even the clean pair has
+    no OSM coverage: a real administrative boundary, just a coarser one than a matched place.
+
+    Every result here is `approximate=True` — this located the nearest recognised administrative
+    area, not a confirmation that this is the address as typed, and the caller must say so.
+    """
+    matched = await _admin_fallback(query, "ng")
+    if matched is None:
+        return []
+    matched_state, matched_lga = matched
+    clean_query = f"{matched_lga}, {matched_state}, Nigeria"
+
+    payload = await _get("search", {"q": clean_query, "limit": max(1, min(limit, 20))})
+    if isinstance(payload, list):
+        found = [p for p in (_to_place(item) for item in payload) if p is not None]
+        if found:
+            return [replace(p, approximate=True, matched_query=clean_query) for p in found]
+
+    extent = await admin.lga_extent(matched_state, matched_lga)
+    if extent is None:
+        return []
+    west, south, east, north = extent
+    return [
+        Place(
+            label=f"{matched_lga}, {matched_state} (nearest recognised area)",
+            lat=(south + north) / 2,
+            lon=(west + east) / 2,
+            bbox=extent,
+            country="NG",
+            admin1=matched_state,
+            admin2=matched_lga,
+            kind="administrative",
+            approximate=True,
+            matched_query=clean_query,
+        )
+    ]
+
+
 async def search(query: str, *, limit: int = 6, country: str | None = None) -> list[Place]:
     """Forward geocode: "Argungu, Kebbi" → candidate places.
 
@@ -368,6 +615,19 @@ async def search(query: str, *, limit: int = 6, country: str | None = None) -> l
     Results are ordered settlements-first, because someone typing a place name wants the
     town rather than a road or a bus stop that shares its name — and Nominatim's own
     ordering is by importance, which does not encode that preference.
+
+    **Two fallback tiers when the raw query matches nothing at all**, tried in this order:
+
+    1. `_clause_fallback` — each comma clause individually, preferring a specific place over an
+       administrative one. Cheaper to get right and, when it works, more precise: a real road or
+       neighbourhood rather than an LGA-sized area.
+    2. `_admin_fallback` — GRID3's own state/LGA hierarchy, for the case a clause never isolates:
+       the useful name interleaved with unmapped text inside a SINGLE clause rather than split
+       cleanly across several.
+
+    A long, informal Nigerian address routinely names a real place alongside words no gazetteer
+    carries, and returning an empty list in that case is a worse answer than an honestly-labelled
+    approximate one — see each fallback's own docstring for the real address that exposed it.
     """
     query = (query or "").strip()
     if len(query) < 3:
@@ -380,10 +640,16 @@ async def search(query: str, *, limit: int = 6, country: str | None = None) -> l
         params["countrycodes"] = country.lower()
 
     payload = await _get("search", params)
-    if not isinstance(payload, list):
-        return []
+    places = (
+        [p for p in (_to_place(item) for item in payload) if p is not None]
+        if isinstance(payload, list)
+        else []
+    )
 
-    places = [p for p in (_to_place(item) for item in payload) if p is not None]
+    if not places:
+        places = await _clause_fallback(query, country, limit)
+    if not places:
+        places = await _resolve_admin_fallback(query, limit)
 
     settlement = {"city", "town", "village", "hamlet", "suburb", "municipality"}
     places.sort(key=lambda p: 0 if (p.kind or "") in settlement else 1)

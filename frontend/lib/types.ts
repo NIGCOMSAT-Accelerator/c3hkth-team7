@@ -789,6 +789,21 @@ export interface PlaceResult {
   ring_hectares: number | null;
   /** What the pipeline can actually do with `ring`. Present whenever a ring is. */
   monitoring: MonitoringNote | null;
+
+  /**
+   * True when the query as typed matched nothing and this is the nearest recognised
+   * administrative area instead — a real Nigerian state/LGA named somewhere in the text, not a
+   * confirmed match for the address itself. MUST be shown, not silently accepted as precise: a
+   * farmer whose family land sits somewhere in an LGA-sized area needs to know they are looking
+   * at the LGA, not their compound.
+   */
+  approximate: boolean;
+  /**
+   * The query actually resolved, when `approximate` is true — e.g. "Obafemi Owode, Ogun,
+   * Nigeria" for an address that never matched as typed. Null when the original query resolved
+   * directly.
+   */
+  matched_query: string | null;
 }
 
 /**

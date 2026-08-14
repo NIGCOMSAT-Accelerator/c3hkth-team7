@@ -2945,6 +2945,11 @@
             ],
             "title": "Admin2"
           },
+          "approximate": {
+            "default": false,
+            "title": "Approximate",
+            "type": "boolean"
+          },
           "bbox": {
             "anyOf": [
               {
@@ -2992,6 +2997,17 @@
           "lon": {
             "title": "Lon",
             "type": "number"
+          },
+          "matched_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched Query"
           },
           "monitoring": {
             "anyOf": [

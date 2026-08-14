@@ -560,6 +560,26 @@ export default function AreaPicker({
                   >
                     {r.label}
                   </button>
+                  {/*
+                    The text as typed matched nothing — this is the nearest recognised
+                    administrative area instead (see `places._admin_fallback`), not a confirmed
+                    match for the address itself. Rendered per-result rather than once above the
+                    list: `approximate` is a property of the match, and a caption over the whole
+                    list would still read as true once the backend can return a mix of exact and
+                    approximate rows for the same query.
+
+                    Must never be silently dropped — presenting an LGA-sized area as if it were
+                    the compound is exactly the "matches nothing, unlike Google" gap this closes,
+                    and doing so *without saying so* would just move the trust problem rather than
+                    fix it.
+                  */}
+                  {r.approximate && (
+                    <p className="picker__result-caveat">
+                      <span aria-hidden="true">◎</span> Exact address not found — showing the
+                      nearest recognised area{r.matched_query ? ` (${r.matched_query})` : ""}.
+                      Confirm the pin below is close enough, or drop a pin manually instead.
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>

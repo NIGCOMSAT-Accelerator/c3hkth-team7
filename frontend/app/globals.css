@@ -3163,6 +3163,29 @@ a.chip:hover {
 }
 
 /* ---------------------------------------------------------------------------
+   Per-result caveat for an approximate (admin-fallback) match.
+
+   Distinct from `.picker__outline`: that one confirms an EXACT location at a coarser
+   monitoring resolution. This is the opposite case — the location itself is approximate, a
+   real Nigerian LGA recognised among words no gazetteer carries, not the address as typed.
+   `--sev-info` for the same reason `.picker__outline` uses it: this is informational, not a
+   warning — a farmer's own family land routinely has no map entry anywhere, and that is not a
+   mistake on their part.
+   --------------------------------------------------------------------------- */
+.picker__result-caveat {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--sev-info);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ---------------------------------------------------------------------------
    The "no results" fallback.
 
    Shown only after a search has completed and found nothing — not while typing, and not

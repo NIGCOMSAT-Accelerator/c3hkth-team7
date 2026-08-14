@@ -144,6 +144,18 @@ class PlaceResult(BaseModel):
     #: honestly: it reports the exact location *and* the resolution separately, rather than
     #: rejecting an address for being precise. See `human.MonitoringNote`.
     monitoring: MonitoringNote | None = None
+    #: True when the query as typed matched nothing and this is the nearest recognised
+    #: administrative area instead (see `places._admin_fallback`) — a real Nigerian state/LGA
+    #: named somewhere in the text, not a confirmed match for the address itself. The client
+    #: MUST show this distinction rather than presenting it as a precise result: a farmer whose
+    #: family land sits somewhere in an LGA-sized area needs to know they are looking at the LGA,
+    #: not their compound.
+    approximate: bool = False
+    #: The query actually resolved, when `approximate` is true — e.g. "Obafemi Owode, Ogun,
+    #: Nigeria" for an address Nominatim never matched as typed. None when the original query
+    #: resolved directly. Lets a client show what was actually searched, for the same reason
+    #: `provenance_block` exists elsewhere in this codebase: a reader should be able to check.
+    matched_query: str | None = None
 
 
 
