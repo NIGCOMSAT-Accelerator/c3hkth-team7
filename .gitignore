@@ -40,7 +40,6 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
 
 # --- Local working notes (not for the public repo) ---
 # CLAUDE.md carries the architecture notes and invariants; docs/ holds the design
@@ -66,3 +65,7 @@ backend/notebooks/.ipynb_checkpoints/
 # bury every real change.
 clients/
 backend/data/*.mmdb
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

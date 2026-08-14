@@ -2,7 +2,7 @@
   "name": "shelter-frontend",
   "version": "1.0.0",
   "private": true,
-  "description": "SHELTER \u2014 Africa's sovereign early-warning network for cascading climate disasters",
+  "description": "SHELTER — Africa's sovereign early-warning network for cascading climate disasters",
   "scripts": {
     "predev": "node scripts/copy-map-worker.mjs",
     "dev": "next dev",
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "ioredis": "^6.0.0",
     "maplibre-gl": "^6.2.0",
     "next": "^16.3.0",
     "react": "19.0.0",

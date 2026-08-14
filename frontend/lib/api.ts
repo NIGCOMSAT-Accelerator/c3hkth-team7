@@ -14,6 +14,7 @@
 
 import "server-only";
 
+import * as cache from "./cache";
 import type {
   Account,
   AggregatorMembership,
@@ -378,6 +379,33 @@ async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * `searchPlaces` caches a genuine match for an hour — never a "no results" answer.
+ *
+ * ## Why this exists rather than `{ revalidate }` on the fetch itself
+ *
+ * Next.js's fetch cache decides whether to cache BEFORE the response body exists, so it can
+ * only ever say "cache this URL for N seconds", never "cache this URL only if the answer turned
+ * out to be non-empty". That symmetry is what caused a real, live failure: a pilot address that
+ * genuinely returned zero results got cached empty for an hour, the backend was then fixed to
+ * resolve it correctly, and the fix stayed invisible on the live site for the rest of that hour
+ * — the cache had no way to know a deploy had changed the answer, because it was never told the
+ * old answer was the kind worth distrusting.
+ *
+ * A found place's coordinates do not move, so caching it long-term is exactly as safe as
+ * `eo/places.py`'s own 7-day Nominatim cache and saves a real round trip on a popular query.
+ * An empty result is never safe to hold onto: it might be a genuinely unmapped address (which
+ * OSM could gain tomorrow), or — as here — a gap in OUR OWN resolution logic that the very next
+ * deploy could close. Caching only the case that cannot regress is the whole fix.
+ *
+ * Backed by `lib/cache.ts` (Dragonfly `db1`, `CACHE_URL`) rather than an in-memory `Map` — a
+ * horizontally scaled UI shares one store instead of each replica caching independently, which
+ * would otherwise reintroduce the exact staleness this cache exists to prevent, just scoped to
+ * whichever replica happened to answer.
+ */
+const _FOUND_PLACES_TTL_SECONDS = 3_600; // 1 hour — the window the old universal cache used, now
+// applied only to the answer that can actually be trusted for that long.
+
 export const api = {
   health: () => request<HealthResponse>("/health", { revalidate: 15 }),
 
@@ -551,11 +579,27 @@ export const api = {
   // Places — public, no credential. The signup form uses them before an account exists.
   // ----------------------------------------------------------------------- //
 
-  searchPlaces: (q: string, country = "ng") =>
-    request<{ results: PlaceResult[]; attribution: string }>(
+  // Caches a genuine match for an hour, shared across UI replicas; a "no results" answer is
+  // never stored — see the comment above `_FOUND_PLACES_TTL_SECONDS` for why the asymmetry is
+  // the point, not an oversight.
+  searchPlaces: async (q: string, country = "ng") => {
+    const cacheKey = cache.key("places-search", country, q);
+
+    const cached = await cache.getJSON<{ results: PlaceResult[]; attribution: string }>(
+      cacheKey,
+    );
+    if (cached) return cached;
+
+    const response = await request<{ results: PlaceResult[]; attribution: string }>(
       `/places/search?q=${encodeURIComponent(q)}&country=${country}&limit=6`,
-      { revalidate: 3600 },
-    ),
+    );
+
+    if (response.results.length > 0) {
+      await cache.setJSON(cacheKey, response, _FOUND_PLACES_TTL_SECONDS);
+    }
+
+    return response;
+  },
 
   /**
    * Type-ahead suggestions for a partially typed place.
