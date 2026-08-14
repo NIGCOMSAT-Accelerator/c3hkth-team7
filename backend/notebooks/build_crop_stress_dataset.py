@@ -107,9 +107,13 @@ AOIS = [
     ("calabar",     [8.30, 4.95, 8.40, 5.05]),
 ]
 
-# Four years of the same season. Same-season sampling is essential: comparing an August total
-# against a year-round distribution would report every wet-season week as exceptional.
-YEARS = [2024, 2025]
+# Eight years of the same season, not two. Same-season sampling is essential: comparing an August
+# total against a year-round distribution would report every wet-season week as exceptional. Two
+# years gave 36 scenes total and left the held-out test AOIs (Calabar, Kano, Lokoja) with 1-2 scenes
+# each — not enough to trust a ship-gate number against. Widening the archive, not the labelling
+# scheme, is the fix: the DE Africa climatology baseline is already robust, the live "current scene"
+# side was the thin one.
+YEARS = list(range(2018, 2026))
 WINDOWS = [("06-15", "08-01"), ("09-15", "11-01")]
 
 # Digital Earth Africa's `ndvi_anomaly` monthly composites are calendar-month binned, so the

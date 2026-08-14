@@ -232,6 +232,31 @@ def test_the_ui_binds_all_interfaces(services: dict[str, str]):
 # --------------------------------------------------------------------------- #
 
 
+def _attached_networks(block: str) -> set[str]:
+    """Network names a service block attaches to, in EITHER YAML style Compose accepts.
+
+    List form:  `- shelter`
+    Map form:   `shelter: {}`  (or `shelter:` with per-network settings nested below it)
+
+    This manifest uses map form throughout — needed for the MVP's actual Dokploy deployment, and
+    functionally identical to list form in every way Compose cares about (both attach the service
+    to `shelter` with default settings). Recognizing only one form is a parser gap, not a manifest
+    fault: a test written against list-form syntax should not read a valid map-form manifest as
+    broken.
+    """
+    section = re.search(r"^    networks:\n((?:      .*\n)+)", block, re.M)
+    if not section:
+        return set()
+    names: set[str] = set()
+    for line in section.group(1).splitlines():
+        match = re.match(r"^      - (\S+)$", line) or re.match(
+            r"^      ([a-z][a-z0-9-]*):", line
+        )
+        if match:
+            names.add(match.group(1))
+    return names
+
+
 def test_every_named_network_is_declared(manifest: str, services: dict[str, str]):
     """Compose fails fast on this, which makes it the benign fault of the three.
 
@@ -240,13 +265,13 @@ def test_every_named_network_is_declared(manifest: str, services: dict[str, str]
     file is deployed by pasting it into a panel.
     """
     top = manifest.split("services:")[0]
-    declared = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", top, re.M))
+    # Optional trailing ` {}` — the top-level declaration is map-form (`shelter: {}`) in this
+    # manifest, same reasoning as `_attached_networks` above.
+    declared = set(re.findall(r"^  ([a-z][a-z0-9-]*):(?: \{\})?$", top, re.M))
 
     used: set[str] = set()
     for block in services.values():
-        section = re.search(r"^    networks:\n((?:      - .*\n)+)", block, re.M)
-        if section:
-            used |= set(re.findall(r"- (\S+)", section.group(1)))
+        used |= _attached_networks(block)
 
     assert used, "no service declares a network"
     missing = sorted(used - declared)
@@ -285,7 +310,11 @@ def test_the_private_network_must_not_be_internal(manifest: str):
     # its own default (bridge under compose, overlay under Swarm). The `+` form then matched nothing
     # and this test failed with "no shelter network is declared" against a manifest where it is
     # declared perfectly well — a false negative that reads like a missing network.
-    block = re.search(r"^  shelter:\n((?:    .*\n)*)", top, re.M)
+    #
+    # `(?: \{\})?` — this manifest declares it as `shelter: {}` (map-form, required by the MVP's
+    # actual Dokploy deployment), not a bare `shelter:`. Same false-negative shape as above: a
+    # syntax Compose treats as identical to the bare form must not read as "undeclared" here.
+    block = re.search(r"^  shelter:(?: \{\})?\n((?:    .*\n)*)", top, re.M)
     assert block, "no `shelter` network is declared"
     assert "internal: true" not in block.group(1), (
         "the shelter network is `internal: true`, which removes the gateway — the workers are on "
@@ -364,7 +393,7 @@ def test_each_public_service_pins_its_traefik_network(service: str, services: di
     assert "traefik.docker.network=dokploy-network" in block, (
         f"{service} is on two networks without telling Traefik which to use"
     )
-    assert "- shelter\n" in block, f"{service} cannot reach the datastores"
+    assert "shelter" in _attached_networks(block), f"{service} cannot reach the datastores"
 
 
 # --------------------------------------------------------------------------- #
