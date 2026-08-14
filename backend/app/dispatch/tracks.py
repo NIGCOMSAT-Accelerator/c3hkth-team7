@@ -297,6 +297,11 @@ def _soil_water_track(a: RiskAssessment) -> Track | None:
         detail.append(("Measured", sm.observed_date))
     if a.soil.available and a.soil.drainage != "unknown":
         detail.append(("Soil drainage", a.soil.drainage))
+    # From iSDAsoil — see `eo/soil_texture.py`. Present exactly when `sm.status` was judged against
+    # this plot's own wilting-point/field-capacity band rather than the wide loam default, so this
+    # line is the reader-facing half of that provenance, not decoration.
+    if sm.texture_class:
+        detail.append(("Soil texture", sm.texture_class))
 
     return Track(
         key="soil_water",
@@ -304,7 +309,7 @@ def _soil_water_track(a: RiskAssessment) -> Track | None:
         reading=sm.status.capitalize(),
         meaning=advice or f"Root-zone soil water is {sm.status}.",
         weight=concern,
-        sources=[s for s in a.data_sources if "smap" in s.lower()],
+        sources=[s for s in a.data_sources if "smap" in s.lower() or "isda" in s.lower()],
         detail=detail,
     )
 

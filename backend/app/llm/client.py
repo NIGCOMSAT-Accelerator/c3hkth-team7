@@ -50,6 +50,25 @@ class LLMRefusal(RuntimeError):
     """
 
 
+class LLMTruncated(RuntimeError):
+    """The provider stopped at its token ceiling with the answer unfinished.
+
+    ## Why this is a distinct, raised failure rather than "return what we got"
+
+    `finish_reason: "length"` was never checked here, so a response cut off mid-sentence looked
+    identical to a complete one — it just returned a shorter string. Every explanation surface
+    (`explain/base.py`) and the advisory generator both fall back to a deterministic template on
+    ANY exception, precisely because "a truncated explanation is worse than a slightly long one,
+    and far worse than the deterministic template" (see `explain/base.MAX_TOKENS`). That fallback
+    already existed; the gap was that nothing here ever triggered it for this failure mode; a
+    truncated string satisfied `.strip()` and shipped to a subscriber as if it were whole.
+
+    Raised rather than silently retried with a larger budget: a caller-specific retry policy
+    belongs with the caller, which knows whether a slower, more expensive second attempt is worth
+    it for that surface (an advisory, yes; a chat answer under a per-turn budget, maybe not).
+    """
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     """One callable the model may invoke.
@@ -229,6 +248,18 @@ def _refusal(message: dict, body: dict) -> str | None:
     return None
 
 
+def _is_truncated(body: dict) -> bool:
+    """Whether the provider stopped at its token ceiling, not at a natural end.
+
+    `finish_reason` is the provider's own signal for this and every OpenAI-compatible server sets
+    it to `"length"` — checking it is authoritative where sniffing the text for a trailing period
+    is not (a reasoning model can truncate exactly at a sentence boundary and still have cut the
+    NEXT sentence entirely).
+    """
+    choices = body.get("choices") or [{}]
+    return choices[0].get("finish_reason") == "length"
+
+
 async def complete(
     messages: list[dict],
     *,
@@ -253,7 +284,17 @@ async def complete(
     if reason:
         raise LLMRefusal(reason)
 
-    return (message.get("content") or "").strip()
+    text = (message.get("content") or "").strip()
+
+    # Checked AFTER refusal (a decline can also report finish_reason="length" on some providers'
+    # compatibility layers) and BEFORE returning — a truncated string must never reach a caller
+    # that only checks "is this empty", which every explanation surface does.
+    if _is_truncated(body):
+        raise LLMTruncated(
+            f"response cut off at the token ceiling ({len(text)} chars returned)"
+        )
+
+    return text
 
 
 async def complete_json(

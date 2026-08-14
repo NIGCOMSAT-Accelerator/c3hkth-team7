@@ -195,6 +195,28 @@ fi
 IMAGE="${REGISTRY_HOST}/${ORG}/${REPO}"
 
 # ---------------------------------------------------------------------------- #
+# 1b. The public site URL — UI only
+# ---------------------------------------------------------------------------- #
+#
+# `NEXT_PUBLIC_*` variables are inlined by Next.js at BUILD TIME, not read from the running
+# container's environment — so whatever this script passes here is permanent for the life of this
+# image tag. It shipped as `http://localhost:3000` in a live release because this script never
+# passed the build-arg at all: the Dockerfile's own `ARG NEXT_PUBLIC_SITE_URL=http://localhost:3000`
+# is the right default for a local dev build and the wrong one for anything pushed to a registry,
+# and nothing here told the two apart. The bug then sat in Open Graph metadata, `metadataBase`, and
+# everywhere else the site refers to itself — and no environment-variable change on the deployed
+# container can fix it afterward. Only a rebuild can, which is why this is asked before the build
+# rather than patched around after.
+if [ "$SERVICE" = "ui" ]; then
+    step "Public site URL"
+    DEFAULT_SITE_URL="$(env_value NEXT_PUBLIC_SITE_URL)"
+    DEFAULT_SITE_URL="${DEFAULT_SITE_URL:-https://shelter.zerorate.io}"
+    say "   ${DIM}Inlined into the build — Open Graph URLs, metadataBase, everywhere the site${RESET}"
+    say "   ${DIM}refers to itself. Wrong here means a rebuild to fix, not a redeploy.${RESET}"
+    NEXT_PUBLIC_SITE_URL="$(prompt 'Public site URL    ' "$DEFAULT_SITE_URL")"
+fi
+
+# ---------------------------------------------------------------------------- #
 # 2. What is going in
 # ---------------------------------------------------------------------------- #
 
@@ -404,11 +426,20 @@ say "   ${DIM}Builder: ${BUILDER_NAME}${RESET}"
 # If a CI runner is ever added, put the cache flags in `release-ci` where the cold-cache
 # assumption actually holds, rather than here. GitHub Actions also offers `type=gha`, which is
 # scoped to the workflow and costs the container registry nothing.
-docker buildx build \
-    --platform "${PLATFORMS:-linux/amd64,linux/arm64}" \
-    --push \
-    -t "${IMAGE}:${TAG}" \
-    "$CONTEXT"
+if [ "$SERVICE" = "ui" ]; then
+    docker buildx build \
+        --platform "${PLATFORMS:-linux/amd64,linux/arm64}" \
+        --build-arg "NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}" \
+        --push \
+        -t "${IMAGE}:${TAG}" \
+        "$CONTEXT"
+else
+    docker buildx build \
+        --platform "${PLATFORMS:-linux/amd64,linux/arm64}" \
+        --push \
+        -t "${IMAGE}:${TAG}" \
+        "$CONTEXT"
+fi
 
 # ---------------------------------------------------------------------------- #
 # 5. Remember the choices
@@ -441,6 +472,10 @@ if [ "$SERVICE" = "api" ]; then
     set_env SHELTER_REPO "$REPO"
     set_env SHELTER_IMAGE "$IMAGE"
     set_env SHELTER_TAG "$TAG"
+else
+    # Unprefixed and shared with .env.example's key exactly, so the next UI release's default
+    # is this run's answer rather than the Dockerfile's local-dev fallback.
+    set_env NEXT_PUBLIC_SITE_URL "$NEXT_PUBLIC_SITE_URL"
 fi
 ok "Remembered — next release defaults to these, and compose now resolves this image"
 

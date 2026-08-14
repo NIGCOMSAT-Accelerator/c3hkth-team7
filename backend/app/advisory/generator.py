@@ -191,6 +191,15 @@ async def generate(
         # A decline recurs on retry, so go straight to the deterministic path.
         log.warning("advisory generation refused", extra={"reason": str(exc)[:200]})
         return _template(assessment, subscriber)
+    except llm.LLMTruncated as exc:
+        # Greppable separately from the generic failure below: a pattern of these means
+        # `advisory_max_tokens` is too low for the model actually configured, not that the
+        # provider or the prompt is broken. See `app/explain/base.py::LLMTruncated`.
+        log.warning(
+            "advisory generation truncated at the token ceiling; using template",
+            extra={"provider": provider, "reason": str(exc), "max_tokens": settings.advisory_max_tokens},
+        )
+        return _template(assessment, subscriber)
     except Exception:
         log.exception(
             "advisory generation failed; using template",
@@ -286,6 +295,16 @@ async def _generate_anthropic(
     if response.stop_reason == "refusal":
         raise llm.LLMRefusal(
             str(getattr(response.stop_details, "category", "refused"))
+        )
+
+    # Anthropic's own name for hitting the token ceiling — `client.py`'s `_is_truncated` checks
+    # the OpenAI-compatible `finish_reason == "length"`, which this SDK path never sets, so it
+    # needs its own check rather than inheriting that one. A truncated response here is usually
+    # invalid JSON and would fail at `json.loads` below anyway, but raising explicitly gives a
+    # clean, greppable log line instead of a parse-error trace that looks like a different bug.
+    if response.stop_reason == "max_tokens":
+        raise llm.LLMTruncated(
+            f"response cut off at max_tokens={settings.advisory_max_tokens}"
         )
 
     text = next((b.text for b in response.content if b.type == "text"), None)

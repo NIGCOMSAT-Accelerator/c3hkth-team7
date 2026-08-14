@@ -241,6 +241,16 @@ async def explain(
         # exception trace — it is a reason to use the deterministic text.
         log.info("explanation refused; using template", extra={"surface": surface, "reason": str(exc)})
         return fallback
+    except client.LLMTruncated as exc:
+        # Distinct from the generic handler below so this is greppable in production logs: a
+        # pattern of these means MAX_TOKENS is too low for the model actually configured, not that
+        # something is broken. See `MAX_TOKENS`'s docstring for how that ceiling was measured
+        # against one provider — a different one may need a different value.
+        log.warning(
+            "explanation truncated at the token ceiling; using template",
+            extra={"surface": surface, "reason": str(exc), "max_tokens": MAX_TOKENS},
+        )
+        return fallback
     except Exception as exc:  # noqa: BLE001 — an explanation must never break an assessment
         log.warning(
             "explanation failed; using template",

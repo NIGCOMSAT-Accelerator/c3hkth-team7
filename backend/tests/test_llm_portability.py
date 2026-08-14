@@ -273,6 +273,51 @@ def test_refusal_is_distinct_from_unavailable():
 
 
 # --------------------------------------------------------------------------- #
+# Truncation detection — a response cut off at the token ceiling must never be
+# mistaken for a complete one
+# --------------------------------------------------------------------------- #
+
+
+def test_truncation_detected_from_finish_reason_length():
+    """The OpenAI-compatible signal for hitting the token ceiling."""
+    body = {"choices": [{"finish_reason": "length"}]}
+    assert llm._is_truncated(body)
+
+
+def test_normal_completion_is_not_truncated():
+    body = {"choices": [{"finish_reason": "stop"}]}
+    assert not llm._is_truncated(body)
+
+
+def test_truncation_is_distinct_from_refusal():
+    """A truncated string is not empty and passes a naive `.strip()` check — the whole reason
+    this needed its own exception rather than reusing LLMRefusal's handling, which callers
+    treat as "decline, use the template" rather than "budget too low, use the template"."""
+    assert llm.LLMTruncated is not llm.LLMRefusal
+    assert not issubclass(llm.LLMTruncated, llm.LLMRefusal)
+
+
+async def test_complete_raises_on_truncation(monkeypatch):
+    """`complete()` must raise rather than return a silently-shortened string — this is the
+    actual bug: a truncated response satisfied every existing check (non-empty, no refusal
+    marker) and shipped to a subscriber as if it were the whole explanation."""
+
+    async def fake_post(payload):
+        return {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": "Satellite radar shows 2% of"},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    with pytest.raises(llm.LLMTruncated):
+        await llm.complete([{"role": "user", "content": "explain"}], max_tokens=20)
+
+
+# --------------------------------------------------------------------------- #
 # Advisory generator — provider selection
 # --------------------------------------------------------------------------- #
 

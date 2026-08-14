@@ -904,8 +904,17 @@ class OracleAgent(Agent[tuple[AreaOfInterest, AnalystResult], RiskAssessment]):
             }
             phrase = _WETNESS_PHRASE.get(wetness.status)
             if phrase:
+                # Cites the texture class when the band came from iSDAsoil rather than the wide
+                # loam default (see `eo/soil_texture.py`) — without this, the word "dry" is a
+                # judgment call a reader has no way to check, which is exactly the gap
+                # `provenance_block` exists to close everywhere else in this codebase.
+                basis = (
+                    f" for this plot's {wetness.texture_class} soil"
+                    if wetness.texture_class
+                    else ""
+                )
                 facts.append(
-                    f"Soil water measured by satellite radar is {phrase} "
+                    f"Soil water measured by satellite radar is {phrase}{basis} "
                     f"({wetness.volumetric:.2f} m3/m3 on {wetness.observed_date})"
                 )
 
@@ -1035,6 +1044,8 @@ class OracleAgent(Agent[tuple[AreaOfInterest, AnalystResult], RiskAssessment]):
             sources.append("soilgrids")
         if wetness is not None and wetness.available:
             sources.append("smap-l3")
+        if wetness is not None and wetness.texture_class:
+            sources.append("isda-soil-texture")
         if health.available:
             sources.append("malaria-atlas")
         if terrain_profile is not None and terrain_profile.available:

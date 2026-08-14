@@ -632,8 +632,13 @@ release-ci: check geoip-verify buildx ## Non-interactive release for CI (no prom
 	docker buildx build --platform $(PLATFORMS) --push \
 	  -t $(BACKEND_IMAGE):$(TAG) \
 	  ./backend
+	# Defaults to the real production site, not localhost: this path pushes to a registry with no
+	# human reviewing the build-args, unlike scripts/release.sh's interactive prompt. A CI release
+	# is a production release by definition, and NEXT_PUBLIC_* is inlined at build time — the wrong
+	# value here ships into Open Graph metadata for the life of the image tag, fixable only by a
+	# rebuild. Still overridable for a staging pipeline: NEXT_PUBLIC_SITE_URL=https://staging... make release-ci
 	docker buildx build --platform $(PLATFORMS) --push \
-	  --build-arg NEXT_PUBLIC_SITE_URL=$${NEXT_PUBLIC_SITE_URL:-http://localhost:3000} \
+	  --build-arg NEXT_PUBLIC_SITE_URL=$${NEXT_PUBLIC_SITE_URL:-https://shelter.zerorate.io} \
 	  -t $(FRONTEND_IMAGE):$(TAG) \
 	  ./frontend
 	@echo
